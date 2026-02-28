@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -30,6 +31,7 @@ type Config struct {
 	Timeout            time.Duration // max time per check
 	GracePeriod        time.Duration // delay before first check
 	UnhealthyThreshold int           // consecutive failures before unhealthy
+	RouteURL           string        // base URL for route health check (e.g. "https://chat.studio.internal")
 }
 
 // Result is the outcome of a single health check.
@@ -264,6 +266,40 @@ func (m *Monitor) checkHTTP(ctx context.Context) error {
 	}
 
 	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("unhealthy status: %d", resp.StatusCode)
+	}
+
+	if m.cfg.RouteURL != "" {
+		if err := m.checkRoute(ctx); err != nil {
+			return fmt.Errorf("route check failed: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (m *Monitor) checkRoute(ctx context.Context) error {
+	url := m.cfg.RouteURL + m.cfg.Path
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+
+	client := &http.Client{
+		Timeout: m.cfg.Timeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}

@@ -474,6 +474,14 @@ func (ms *ManagedService) startHealthMonitor(ctx context.Context) *health.Monito
 		UnhealthyThreshold: h.UnhealthyThreshold,
 	}
 
+	if ms.spec.Routing != nil && h.Type == "http" && ms.spec.Routing.TLSOptions == "" {
+		scheme := "http"
+		if ms.spec.Routing.TLS {
+			scheme = "https"
+		}
+		cfg.RouteURL = fmt.Sprintf("%s://%s", scheme, ms.spec.Routing.Hostname)
+	}
+
 	monitor := health.NewMonitor(cfg, ms.logger, func() {
 		// Signal the supervision loop to restart
 		select {

@@ -382,6 +382,148 @@ func TestRecoveryFromUnhealthy(t *testing.T) {
 	}
 }
 
+func TestRouteCheckFailureMarksUnhealthy(t *testing.T) {
+	// Direct check server — always healthy
+	directMux := http.NewServeMux()
+	directMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	})
+	directListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directPort := directListener.Addr().(*net.TCPAddr).Port
+	directSrv := &http.Server{Handler: directMux}
+	go directSrv.Serve(directListener)
+	defer directSrv.Close()
+
+	// Route server — always unhealthy (simulates broken traefik)
+	routeMux := http.NewServeMux()
+	routeMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(502)
+	})
+	routeListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	routePort := routeListener.Addr().(*net.TCPAddr).Port
+	routeSrv := &http.Server{Handler: routeMux}
+	go routeSrv.Serve(routeListener)
+	defer routeSrv.Close()
+
+	cfg := Config{
+		Type:               "http",
+		Path:               "/health",
+		Port:               directPort,
+		RouteURL:           fmt.Sprintf("http://127.0.0.1:%d", routePort),
+		Interval:           50 * time.Millisecond,
+		Timeout:            2 * time.Second,
+		UnhealthyThreshold: 2,
+	}
+
+	m := NewMonitor(cfg, testLogger(), nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m.Start(ctx)
+	time.Sleep(300 * time.Millisecond)
+	m.Stop()
+
+	if m.CurrentStatus() != StatusUnhealthy {
+		t.Errorf("expected unhealthy when route check fails, got %v", m.CurrentStatus())
+	}
+}
+
+func TestRouteCheckBothPassingHealthy(t *testing.T) {
+	// Both direct and route servers return healthy
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	})
+
+	directListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	directPort := directListener.Addr().(*net.TCPAddr).Port
+	directSrv := &http.Server{Handler: mux}
+	go directSrv.Serve(directListener)
+	defer directSrv.Close()
+
+	routeListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	routePort := routeListener.Addr().(*net.TCPAddr).Port
+	routeSrv := &http.Server{Handler: mux}
+	go routeSrv.Serve(routeListener)
+	defer routeSrv.Close()
+
+	cfg := Config{
+		Type:               "http",
+		Path:               "/health",
+		Port:               directPort,
+		RouteURL:           fmt.Sprintf("http://127.0.0.1:%d", routePort),
+		Interval:           50 * time.Millisecond,
+		Timeout:            2 * time.Second,
+		UnhealthyThreshold: 2,
+	}
+
+	m := NewMonitor(cfg, testLogger(), nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m.Start(ctx)
+	time.Sleep(300 * time.Millisecond)
+	m.Stop()
+
+	if m.CurrentStatus() != StatusHealthy {
+		t.Errorf("expected healthy when both checks pass, got %v", m.CurrentStatus())
+	}
+}
+
+func TestRouteCheckSkippedWhenEmpty(t *testing.T) {
+	// No RouteURL set — should behave exactly like a normal HTTP check
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	})
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(listener)
+	defer srv.Close()
+
+	cfg := Config{
+		Type:               "http",
+		Path:               "/health",
+		Port:               port,
+		RouteURL:           "", // explicitly empty
+		Interval:           50 * time.Millisecond,
+		Timeout:            2 * time.Second,
+		UnhealthyThreshold: 2,
+	}
+
+	m := NewMonitor(cfg, testLogger(), nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m.Start(ctx)
+	time.Sleep(300 * time.Millisecond)
+	m.Stop()
+
+	if m.CurrentStatus() != StatusHealthy {
+		t.Errorf("expected healthy when RouteURL is empty, got %v", m.CurrentStatus())
+	}
+}
+
 func TestSingleCheckHTTPHealthy(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
