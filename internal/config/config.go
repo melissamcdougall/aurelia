@@ -40,5 +40,7 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	cfg.RoutingOutput = os.ExpandEnv(cfg.RoutingOutput)
+	cfg.APIAddr = os.ExpandEnv(cfg.APIAddr)
 	return cfg, nil
 }

@@ -796,6 +796,78 @@ func TestValidateNativeServiceRejectsArgs(t *testing.T) {
 	}
 }
 
+func TestExpandEnv(t *testing.T) {
+	t.Setenv("AURELIA_ROOT", "/opt/aurelia")
+
+	s := &ServiceSpec{
+		Service: Service{
+			Name:       "test",
+			Type:       "native",
+			Command:    "${AURELIA_ROOT}/bin/foo",
+			WorkingDir: "${AURELIA_ROOT}/services/foo",
+		},
+		Env: map[string]string{
+			"IMAGE_DIR": "${AURELIA_ROOT}/data/images",
+			"STATIC":    "no-expansion-needed",
+		},
+		Volumes: map[string]string{
+			"${AURELIA_ROOT}/data/pg": "/var/lib/postgresql/data",
+			"/container/path":        "${AURELIA_ROOT}/host/path",
+		},
+	}
+
+	s.ExpandEnv()
+
+	if s.Service.Command != "/opt/aurelia/bin/foo" {
+		t.Errorf("Command = %q, want %q", s.Service.Command, "/opt/aurelia/bin/foo")
+	}
+	if s.Service.WorkingDir != "/opt/aurelia/services/foo" {
+		t.Errorf("WorkingDir = %q, want %q", s.Service.WorkingDir, "/opt/aurelia/services/foo")
+	}
+	if s.Env["IMAGE_DIR"] != "/opt/aurelia/data/images" {
+		t.Errorf("Env[IMAGE_DIR] = %q, want %q", s.Env["IMAGE_DIR"], "/opt/aurelia/data/images")
+	}
+	if s.Env["STATIC"] != "no-expansion-needed" {
+		t.Errorf("Env[STATIC] = %q, want unchanged", s.Env["STATIC"])
+	}
+	if v, ok := s.Volumes["/opt/aurelia/data/pg"]; !ok || v != "/var/lib/postgresql/data" {
+		t.Errorf("Volume key not expanded: got %v", s.Volumes)
+	}
+	if v, ok := s.Volumes["/container/path"]; !ok || v != "/opt/aurelia/host/path" {
+		t.Errorf("Volume value not expanded: got %v", s.Volumes)
+	}
+}
+
+func TestLoadExpandsEnvVars(t *testing.T) {
+	t.Setenv("AURELIA_ROOT", "/opt/aurelia")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.yaml")
+	data := `
+service:
+  name: test
+  type: native
+  command: ${AURELIA_ROOT}/bin/test
+
+env:
+  DATA_DIR: ${AURELIA_ROOT}/data
+`
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	spec, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if spec.Service.Command != "/opt/aurelia/bin/test" {
+		t.Errorf("Command = %q, want expanded path", spec.Service.Command)
+	}
+	if spec.Env["DATA_DIR"] != "/opt/aurelia/data" {
+		t.Errorf("Env[DATA_DIR] = %q, want expanded path", spec.Env["DATA_DIR"])
+	}
+}
+
 func TestValidateContainerServiceAllowsArgs(t *testing.T) {
 	t.Parallel()
 	spec := &ServiceSpec{

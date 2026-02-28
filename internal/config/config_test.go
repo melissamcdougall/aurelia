@@ -88,6 +88,31 @@ func TestLoadPartialConfig(t *testing.T) {
 	}
 }
 
+func TestLoadExpandsEnvVars(t *testing.T) {
+	t.Setenv("AURELIA_ROOT", "/opt/aurelia")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `routing_output: ${AURELIA_ROOT}/traefik/dynamic/aurelia.yaml
+api_addr: 127.0.0.1:9090
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RoutingOutput != "/opt/aurelia/traefik/dynamic/aurelia.yaml" {
+		t.Errorf("RoutingOutput = %q, want expanded path", cfg.RoutingOutput)
+	}
+	if cfg.APIAddr != "127.0.0.1:9090" {
+		t.Errorf("APIAddr = %q, want unchanged", cfg.APIAddr)
+	}
+}
+
 func TestLoadCommentsOnly(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

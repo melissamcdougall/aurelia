@@ -100,6 +100,24 @@ func (d Duration) MarshalYAML() (any, error) {
 	return d.Duration.String(), nil
 }
 
+// ExpandEnv expands environment variables in path and value fields using os.ExpandEnv.
+// This supports $VAR and ${VAR} patterns, allowing specs to use e.g. ${AURELIA_ROOT}
+// instead of hardcoded absolute paths.
+func (s *ServiceSpec) ExpandEnv() {
+	s.Service.Command = os.ExpandEnv(s.Service.Command)
+	s.Service.WorkingDir = os.ExpandEnv(s.Service.WorkingDir)
+	for k, v := range s.Env {
+		s.Env[k] = os.ExpandEnv(v)
+	}
+	if s.Volumes != nil {
+		expanded := make(map[string]string, len(s.Volumes))
+		for k, v := range s.Volumes {
+			expanded[os.ExpandEnv(k)] = os.ExpandEnv(v)
+		}
+		s.Volumes = expanded
+	}
+}
+
 // Load reads and parses a service spec from a YAML file.
 func Load(path string) (*ServiceSpec, error) {
 	data, err := os.ReadFile(path)
@@ -111,6 +129,8 @@ func Load(path string) (*ServiceSpec, error) {
 	if err := yaml.Unmarshal(data, &spec); err != nil {
 		return nil, fmt.Errorf("parsing spec %s: %w", path, err)
 	}
+
+	spec.ExpandEnv()
 
 	if err := spec.Validate(); err != nil {
 		return nil, fmt.Errorf("validating spec %s: %w", path, err)
