@@ -308,24 +308,29 @@ func (d *Daemon) Shutdown(timeout time.Duration) {
 	d.logger.Info("shutdown complete, state file preserved for adoption")
 }
 
-// IsExternal returns true if the named service is an external (unmanaged) service.
-func (d *Daemon) IsExternal(name string) bool {
+// getService returns the managed service with the given name, or an error if not found.
+func (d *Daemon) getService(name string) (*ManagedService, error) {
 	d.mu.RLock()
 	ms, ok := d.services[name]
 	d.mu.RUnlock()
-	return ok && ms.IsExternal()
+	if !ok {
+		return nil, fmt.Errorf("service %q not found", name)
+	}
+	return ms, nil
+}
+
+// IsExternal returns true if the named service is an external (unmanaged) service.
+func (d *Daemon) IsExternal(name string) bool {
+	ms, err := d.getService(name)
+	return err == nil && ms.IsExternal()
 }
 
 // StartService starts a single service by name.
 func (d *Daemon) StartService(ctx context.Context, name string) error {
-	d.mu.RLock()
-	ms, ok := d.services[name]
-	d.mu.RUnlock()
-
-	if !ok {
-		return fmt.Errorf("service %q not found", name)
+	ms, err := d.getService(name)
+	if err != nil {
+		return err
 	}
-
 	return ms.Start(ctx)
 }
 
@@ -396,27 +401,19 @@ func (d *Daemon) ServiceStates() []ServiceState {
 
 // ServiceLogs returns the last n log lines for a service.
 func (d *Daemon) ServiceLogs(name string, n int) ([]string, error) {
-	d.mu.RLock()
-	ms, ok := d.services[name]
-	d.mu.RUnlock()
-
-	if !ok {
-		return nil, fmt.Errorf("service %q not found", name)
+	ms, err := d.getService(name)
+	if err != nil {
+		return nil, err
 	}
-
 	return ms.Logs(n), nil
 }
 
 // ServiceState returns the state of a single service.
 func (d *Daemon) ServiceState(name string) (ServiceState, error) {
-	d.mu.RLock()
-	ms, ok := d.services[name]
-	d.mu.RUnlock()
-
-	if !ok {
-		return ServiceState{}, fmt.Errorf("service %q not found", name)
+	ms, err := d.getService(name)
+	if err != nil {
+		return ServiceState{}, err
 	}
-
 	return ms.State(), nil
 }
 
@@ -489,7 +486,7 @@ func (d *Daemon) Reload(_ context.Context) (*ReloadResult, error) {
 	}
 
 	// Regenerate routing after reconciliation (write lock is held, use locked variant)
-	d.regenerateRoutingLocked()
+	d.regenerateRoutingLocked(nil)
 
 	return result, nil
 }
@@ -528,13 +525,7 @@ func (d *Daemon) startServiceLocked(ctx context.Context, s *spec.ServiceSpec) er
 		}
 
 		ms.onStarted = func(pid int) {
-			rec := ServiceRecord{
-				Type:      s.Service.Type,
-				PID:       pid,
-				Port:      ms.allocatedPort,
-				StartedAt: time.Now().Unix(),
-				Command:   s.Service.Command,
-			}
+			rec := newServiceRecord(s.Service.Type, pid, ms.allocatedPort, s.Service.Command)
 			if st, err := driver.ProcessStartTime(pid); err == nil {
 				rec.StartTime = st
 			}
@@ -566,12 +557,13 @@ func (d *Daemon) regenerateRouting() {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	d.regenerateRoutingLocked()
+	d.regenerateRoutingLocked(nil)
 }
 
 // regenerateRoutingLocked is the lock-free variant of regenerateRouting.
 // It must only be called by a goroutine that already holds d.mu (read or write).
-func (d *Daemon) regenerateRoutingLocked() {
+// portOverrides optionally maps service names to port overrides (e.g. during deploy).
+func (d *Daemon) regenerateRoutingLocked(portOverrides map[string]int) {
 	if d.routing == nil {
 		return
 	}
@@ -593,6 +585,10 @@ func (d *Daemon) regenerateRoutingLocked() {
 		}
 		if port == 0 {
 			continue
+		}
+
+		if override, ok := portOverrides[ms.spec.Service.Name]; ok {
+			port = override
 		}
 
 		routes = append(routes, routing.ServiceRoute{
@@ -628,13 +624,7 @@ func (d *Daemon) adoptService(ctx context.Context, s *spec.ServiceSpec, drv driv
 	}
 
 	ms.onStarted = func(pid int) {
-		rec := ServiceRecord{
-			Type:      s.Service.Type,
-			PID:       pid,
-			Port:      ms.allocatedPort,
-			StartedAt: time.Now().Unix(),
-			Command:   s.Service.Command,
-		}
+		rec := newServiceRecord(s.Service.Type, pid, ms.allocatedPort, s.Service.Command)
 		if st, err := driver.ProcessStartTime(pid); err == nil {
 			rec.StartTime = st
 		}

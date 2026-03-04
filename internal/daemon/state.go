@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // stateFile persists service PIDs for crash recovery.
@@ -24,6 +25,17 @@ type ServiceRecord struct {
 	StartedAt int64  `json:"started_at,omitempty"` // Unix timestamp
 	Command   string `json:"command,omitempty"`    // process command for PID reuse detection
 	StartTime int64  `json:"start_time,omitempty"` // OS-reported process start time for PID reuse detection
+}
+
+// newServiceRecord creates a ServiceRecord with the common fields populated.
+func newServiceRecord(serviceType string, pid, port int, command string) ServiceRecord {
+	return ServiceRecord{
+		Type:      serviceType,
+		PID:       pid,
+		Port:      port,
+		StartedAt: time.Now().Unix(),
+		Command:   command,
+	}
 }
 
 func newStateFile(dir string) *stateFile {
