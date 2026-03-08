@@ -127,30 +127,9 @@ func (ms *ManagedService) Start(ctx context.Context) error {
 // Stop gracefully stops the service and its supervision loop.
 // For external services, it stops health monitoring only.
 func (ms *ManagedService) Stop(timeout time.Duration) error {
-	ms.mu.Lock()
-	cancel := ms.cancel
-	stopped := ms.stopped
-	monitor := ms.monitor
-	ms.mu.Unlock()
-
-	if cancel == nil {
-		return nil
-	}
-
-	// Cancel the supervision loop first to prevent restarts during shutdown
-	cancel()
-
-	// Stop health monitoring
-	if monitor != nil {
-		monitor.Stop()
-	}
-
-	// Wait for supervision loop to finish — this ensures no new drivers
-	// are created after this point
-	select {
-	case <-stopped:
-	case <-time.After(timeout + 5*time.Second):
-		return fmt.Errorf("timed out waiting for service %s to stop", ms.spec.Service.Name)
+	// Cancel first to prevent restarts during shutdown
+	if err := ms.detach(timeout + 5*time.Second); err != nil {
+		return err
 	}
 
 	// Stop the final driver — read ms.drv after supervision exits since the
@@ -168,10 +147,14 @@ func (ms *ManagedService) Stop(timeout time.Duration) error {
 }
 
 // Release detaches supervision without killing the underlying process.
-// It stops health monitoring, cancels the supervision context (causing the
-// supervise goroutine to exit), and waits for it to finish. Unlike Stop(),
-// it does NOT call drv.Stop() — the process is left running as an orphan.
+// Unlike Stop(), it does NOT call drv.Stop() — the process is left running.
 func (ms *ManagedService) Release(timeout time.Duration) error {
+	return ms.detach(timeout)
+}
+
+// detach cancels the supervision loop, stops health monitoring, and waits
+// for the supervision goroutine to finish within the given timeout.
+func (ms *ManagedService) detach(timeout time.Duration) error {
 	ms.mu.Lock()
 	cancel := ms.cancel
 	stopped := ms.stopped
@@ -182,21 +165,17 @@ func (ms *ManagedService) Release(timeout time.Duration) error {
 		return nil
 	}
 
-	// Stop health monitoring
+	cancel()
+
 	if monitor != nil {
 		monitor.Stop()
 	}
 
-	// Cancel the supervision context — this causes supervise() to exit
-	// via ctx.Done() without killing the process
-	cancel()
-
-	// Wait for supervision goroutine to finish
 	select {
 	case <-stopped:
 		return nil
 	case <-time.After(timeout):
-		return fmt.Errorf("timed out waiting for service %s to release", ms.spec.Service.Name)
+		return fmt.Errorf("timed out waiting for service %s to detach", ms.spec.Service.Name)
 	}
 }
 
@@ -496,42 +475,20 @@ func (ms *ManagedService) startHealthMonitor(ctx context.Context) *health.Monito
 }
 
 // createDriverWithPort creates a driver configured to listen on the given port.
-// Used during blue-green deploys.
+// Used during blue-green deploys where the container gets a "-deploy" suffix.
 func (ms *ManagedService) createDriverWithPort(port int) driver.Driver {
-	env := ms.buildEnvWithPort(port)
-
-	switch ms.spec.Service.Type {
-	case "container":
-		d, err := driver.NewContainer(driver.ContainerConfig{
-			Name:        ms.spec.Service.Name + "-deploy",
-			Image:       ms.spec.Service.Image,
-			Env:         env,
-			Cmd:         ms.spec.Args,
-			NetworkMode: ms.spec.Service.NetworkMode,
-			Privileged:  ms.spec.Service.Privileged,
-			Volumes:     ms.spec.Volumes,
-		})
-		if err != nil {
-			ms.logger.Error("failed to create container driver for deploy", "error", err)
-			return driver.NewNative(driver.NativeConfig{Command: "false"})
-		}
-		return d
-	default:
-		return driver.NewNative(driver.NativeConfig{
-			Command:    ms.spec.Service.Command,
-			Env:        env,
-			WorkingDir: ms.spec.Service.WorkingDir,
-		})
-	}
+	return ms.createDriverInternal(ms.buildEnvWithPort(port), ms.spec.Service.Name+"-deploy")
 }
 
 func (ms *ManagedService) createDriver() driver.Driver {
-	env := ms.buildEnv()
+	return ms.createDriverInternal(ms.buildEnv(), ms.spec.Service.Name)
+}
 
+func (ms *ManagedService) createDriverInternal(env []string, containerName string) driver.Driver {
 	switch ms.spec.Service.Type {
 	case "container":
 		d, err := driver.NewContainer(driver.ContainerConfig{
-			Name:        ms.spec.Service.Name,
+			Name:        containerName,
 			Image:       ms.spec.Service.Image,
 			Env:         env,
 			Cmd:         ms.spec.Args,
@@ -541,7 +498,6 @@ func (ms *ManagedService) createDriver() driver.Driver {
 		})
 		if err != nil {
 			ms.logger.Error("failed to create container driver", "error", err)
-			// Fall through — the start will fail gracefully
 			return driver.NewNative(driver.NativeConfig{Command: "false"})
 		}
 		return d
@@ -563,8 +519,9 @@ func (ms *ManagedService) buildEnvWithPort(port int) []string {
 		env = os.Environ()
 	}
 
-	// Use the provided port override
-	env = append(env, fmt.Sprintf("PORT=%d", port))
+	if port != 0 {
+		env = append(env, fmt.Sprintf("PORT=%d", port))
+	}
 
 	for k, v := range ms.spec.Env {
 		env = append(env, k+"="+v)
@@ -587,37 +544,11 @@ func (ms *ManagedService) buildEnvWithPort(port int) []string {
 }
 
 func (ms *ManagedService) buildEnv() []string {
-	// For native: inherit host env. For containers: clean env.
-	var env []string
-	if ms.spec.Service.Type == "native" {
-		env = os.Environ()
+	port := ms.allocatedPort
+	if port == 0 && ms.spec.Network != nil {
+		port = ms.spec.Network.Port
 	}
-
-	// Inject port as PORT env var (dynamic or static)
-	if ms.allocatedPort != 0 {
-		env = append(env, fmt.Sprintf("PORT=%d", ms.allocatedPort))
-	} else if ms.spec.Network != nil && ms.spec.Network.Port != 0 {
-		env = append(env, fmt.Sprintf("PORT=%d", ms.spec.Network.Port))
-	}
-
-	for k, v := range ms.spec.Env {
-		env = append(env, k+"="+v)
-	}
-
-	// Resolve secrets from Keychain and inject as env vars
-	if ms.secrets != nil && len(ms.spec.Secrets) > 0 {
-		for envVar, ref := range ms.spec.Secrets {
-			val, err := ms.secrets.Get(ref.Keychain)
-			if err != nil {
-				ms.logger.Warn("secret not found, skipping", "env_var", envVar, "keychain_key", ref.Keychain, "error", err)
-				continue
-			}
-			env = append(env, envVar+"="+val)
-			ms.logger.Info("injected secret", "env_var", envVar)
-		}
-	}
-
-	return env
+	return ms.buildEnvWithPort(port)
 }
 
 func (ms *ManagedService) shouldRestart() bool {
