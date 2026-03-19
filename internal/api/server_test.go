@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/benaskins/aurelia/internal/daemon"
+	"github.com/benaskins/aurelia/internal/node"
 )
 
 func setupTestServer(t *testing.T, specs map[string]string) (*Server, *http.Client) {
@@ -466,4 +468,168 @@ func TestListenTCPLoopbackNoWarning(t *testing.T) {
 	if strings.Contains(buf.String(), "non-loopback") {
 		t.Errorf("unexpected non-loopback warning for 127.0.0.1: %s", buf.String())
 	}
+}
+
+func setupTestServerWithPeers(t *testing.T, specs map[string]string, peers []*node.Client) (*Server, *http.Client) {
+	t.Helper()
+
+	dir := t.TempDir()
+	for name, content := range specs {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	opts := []daemon.Option{}
+	if len(peers) > 0 {
+		opts = append(opts, daemon.WithPeers(peers))
+	}
+	d := daemon.NewDaemon(dir, opts...)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("daemon start: %v", err)
+	}
+	t.Cleanup(func() { d.Stop(5 * time.Second) })
+
+	time.Sleep(100 * time.Millisecond)
+
+	srv := NewServer(d, nil)
+
+	// Use /tmp for socket to avoid macOS 104-char Unix socket path limit
+	sockDir, err := os.MkdirTemp("/tmp", "aurelia-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(sockDir) })
+	sockPath := filepath.Join(sockDir, "t.sock")
+	go srv.ListenUnix(sockPath)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	for i := 0; i < 20; i++ {
+		conn, err := net.Dial("unix", sockPath)
+		if err == nil {
+			conn.Close()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return net.Dial("unix", sockPath)
+		},
+	}
+	t.Cleanup(func() { transport.CloseIdleConnections() })
+
+	return srv, &http.Client{Transport: transport}
+}
+
+func TestClusterServicesAggregation(t *testing.T) {
+	// Set up a fake peer daemon
+	peerSrv := fakePeerServer(t, []daemon.ServiceState{
+		{Name: "remote-svc", Type: "native", State: "running", Node: "limen"},
+	})
+	defer peerSrv.Close()
+
+	peer := node.New("limen", peerSrv.Listener.Addr().String(), "tok")
+	_, client := setupTestServerWithPeers(t, map[string]string{
+		"svc.yaml": `
+service:
+  name: local-svc
+  type: native
+  command: "sleep 30"
+`,
+	}, []*node.Client{peer})
+
+	resp, err := client.Get("http://aurelia/v1/cluster/services")
+	if err != nil {
+		t.Fatalf("GET /v1/cluster/services: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var states []daemon.ServiceState
+	json.NewDecoder(resp.Body).Decode(&states)
+
+	// Should have both local and remote services
+	names := make(map[string]bool)
+	for _, s := range states {
+		names[s.Name] = true
+	}
+	if !names["local-svc"] {
+		t.Error("expected local-svc in cluster services")
+	}
+	if !names["remote-svc"] {
+		t.Error("expected remote-svc in cluster services")
+	}
+
+	// Local service should have node stamped
+	for _, s := range states {
+		if s.Name == "local-svc" && s.Node == "" {
+			t.Error("expected local-svc to have Node field set")
+		}
+	}
+}
+
+func TestClusterServicesProxyCommand(t *testing.T) {
+	var gotPath, gotMethod string
+	peerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer peerSrv.Close()
+
+	peer := node.New("limen", peerSrv.Listener.Addr().String(), "tok")
+	_, client := setupTestServerWithPeers(t, nil, []*node.Client{peer})
+
+	// Proxy restart to remote node
+	resp, err := client.Post("http://aurelia/v1/cluster/services/foo/restart?node=limen", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST cluster restart: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if gotPath != "/v1/services/foo/restart" {
+		t.Errorf("proxied path = %q, want /v1/services/foo/restart", gotPath)
+	}
+	if gotMethod != "POST" {
+		t.Errorf("proxied method = %q, want POST", gotMethod)
+	}
+}
+
+func TestClusterServicesProxyUnknownNode(t *testing.T) {
+	_, client := setupTestServerWithPeers(t, nil, nil)
+
+	resp, err := client.Post("http://aurelia/v1/cluster/services/foo/restart?node=unknown", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != 404 {
+		t.Errorf("expected 404 for unknown node, got %d", resp.StatusCode)
+	}
+}
+
+func fakePeerServer(t *testing.T, states []daemon.ServiceState) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/services":
+			json.NewEncoder(w).Encode(states)
+		case "/v1/health":
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		default:
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		}
+	}))
 }
