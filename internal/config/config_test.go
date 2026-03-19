@@ -113,6 +113,109 @@ api_addr: 127.0.0.1:9090
 	}
 }
 
+func TestLoadNodesConfig(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `routing_output: /tmp/traefik/dynamic.yaml
+api_addr: 127.0.0.1:9090
+node_name: aurelia
+nodes:
+  - name: limen
+    addr: limen.local:9090
+    token: secret123
+  - name: aurelia
+    addr: aurelia.local:9090
+    token_file: /tmp/aurelia.token
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.NodeName != "aurelia" {
+		t.Errorf("NodeName = %q, want %q", cfg.NodeName, "aurelia")
+	}
+	if len(cfg.Nodes) != 2 {
+		t.Fatalf("len(Nodes) = %d, want 2", len(cfg.Nodes))
+	}
+	if cfg.Nodes[0].Name != "limen" {
+		t.Errorf("Nodes[0].Name = %q, want %q", cfg.Nodes[0].Name, "limen")
+	}
+	if cfg.Nodes[0].Addr != "limen.local:9090" {
+		t.Errorf("Nodes[0].Addr = %q, want %q", cfg.Nodes[0].Addr, "limen.local:9090")
+	}
+	if cfg.Nodes[0].Token != "secret123" {
+		t.Errorf("Nodes[0].Token = %q, want %q", cfg.Nodes[0].Token, "secret123")
+	}
+	if cfg.Nodes[1].TokenFile != "/tmp/aurelia.token" {
+		t.Errorf("Nodes[1].TokenFile = %q, want %q", cfg.Nodes[1].TokenFile, "/tmp/aurelia.token")
+	}
+}
+
+func TestFindNode(t *testing.T) {
+	t.Parallel()
+	cfg := &Config{
+		Nodes: []Node{
+			{Name: "aurelia", Addr: "aurelia.local:9090"},
+			{Name: "limen", Addr: "limen.local:9090"},
+		},
+	}
+
+	n, ok := cfg.FindNode("limen")
+	if !ok {
+		t.Fatal("expected to find node limen")
+	}
+	if n.Addr != "limen.local:9090" {
+		t.Errorf("Addr = %q, want %q", n.Addr, "limen.local:9090")
+	}
+
+	_, ok = cfg.FindNode("nonexistent")
+	if ok {
+		t.Error("expected not to find nonexistent node")
+	}
+}
+
+func TestNodeLoadToken(t *testing.T) {
+	t.Parallel()
+
+	// Inline token
+	n := Node{Name: "test", Token: "inline-token"}
+	token, err := n.LoadToken()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if token != "inline-token" {
+		t.Errorf("token = %q, want %q", token, "inline-token")
+	}
+
+	// Token from file
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "token")
+	if err := os.WriteFile(tokenPath, []byte("file-token\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	n2 := Node{Name: "test2", TokenFile: tokenPath}
+	token2, err := n2.LoadToken()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if token2 != "file-token" {
+		t.Errorf("token = %q, want %q", token2, "file-token")
+	}
+
+	// No token configured
+	n3 := Node{Name: "test3"}
+	_, err = n3.LoadToken()
+	if err == nil {
+		t.Error("expected error when no token configured")
+	}
+}
+
 func TestLoadCommentsOnly(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
