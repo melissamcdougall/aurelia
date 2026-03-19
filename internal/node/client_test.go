@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/benaskins/aurelia/internal/daemon"
 )
 
 func TestClientInjectsToken(t *testing.T) {
@@ -30,15 +28,14 @@ func TestClientInjectsToken(t *testing.T) {
 
 func TestClientStatus(t *testing.T) {
 	t.Parallel()
-	states := []daemon.ServiceState{
-		{Name: "svc-a", State: "running"},
-		{Name: "svc-b", State: "stopped"},
-	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/services" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode(states)
+		json.NewEncoder(w).Encode([]map[string]string{
+			{"name": "svc-a", "state": "running"},
+			{"name": "svc-b", "state": "stopped"},
+		})
 	}))
 	defer srv.Close()
 
@@ -47,11 +44,16 @@ func TestClientStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error: %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("len = %d, want 2", len(got))
+	// Decode to verify structure
+	var states []map[string]string
+	if err := json.Unmarshal(got, &states); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-	if got[0].Name != "svc-a" {
-		t.Errorf("Name = %q, want %q", got[0].Name, "svc-a")
+	if len(states) != 2 {
+		t.Fatalf("len = %d, want 2", len(states))
+	}
+	if states[0]["name"] != "svc-a" {
+		t.Errorf("Name = %q, want %q", states[0]["name"], "svc-a")
 	}
 }
 

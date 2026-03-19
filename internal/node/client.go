@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"strconv"
 	"time"
-
-	"github.com/benaskins/aurelia/internal/daemon"
 )
 
 // Client talks to a remote aurelia daemon over its TCP API.
@@ -37,19 +35,20 @@ func (c *Client) Health() error {
 	return err
 }
 
-// Status returns the service states from the remote daemon.
-func (c *Client) Status() ([]daemon.ServiceState, error) {
+// Status returns the raw JSON service states from the remote daemon.
+// Callers decode into their own type to avoid import cycles.
+func (c *Client) Status() (json.RawMessage, error) {
 	body, err := c.get("/v1/services")
 	if err != nil {
 		return nil, err
 	}
 	defer body.Close()
 
-	var states []daemon.ServiceState
-	if err := json.NewDecoder(body).Decode(&states); err != nil {
-		return nil, fmt.Errorf("decoding status from %s: %w", c.Name, err)
+	data, err := io.ReadAll(io.LimitReader(body, 10<<20))
+	if err != nil {
+		return nil, fmt.Errorf("reading status from %s: %w", c.Name, err)
 	}
-	return states, nil
+	return json.RawMessage(data), nil
 }
 
 // StartService starts a service on the remote daemon.
