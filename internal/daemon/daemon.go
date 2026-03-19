@@ -9,6 +9,7 @@ import (
 
 	"github.com/benaskins/aurelia/internal/driver"
 	"github.com/benaskins/aurelia/internal/keychain"
+	"github.com/benaskins/aurelia/internal/node"
 	"github.com/benaskins/aurelia/internal/port"
 	"github.com/benaskins/aurelia/internal/routing"
 	"github.com/benaskins/aurelia/internal/spec"
@@ -40,17 +41,21 @@ type Daemon struct {
 	ctx          context.Context // daemon lifecycle context, set in Start()
 	adopted      []string        // services adopted during crash recovery, pending redeploy
 	redeployWait time.Duration   // delay before redeploying adopted services (default 10s)
+	peers        map[string]*node.Client // remote daemon peers
+	peerStatus   map[string]bool         // peer name -> reachable
 }
 
 // NewDaemon creates a new daemon that manages services from the given spec directory.
 // The secrets store is optional — if nil, secret injection is disabled.
 func NewDaemon(specDir string, opts ...Option) *Daemon {
 	d := &Daemon{
-		specDir:  specDir,
-		stateDir: specDir, // default: same as spec dir
-		ports:    port.NewAllocator(defaultPortMin, defaultPortMax),
-		services: make(map[string]*ManagedService),
-		logger:   slog.With("component", "daemon"),
+		specDir:    specDir,
+		stateDir:   specDir, // default: same as spec dir
+		ports:      port.NewAllocator(defaultPortMin, defaultPortMax),
+		services:   make(map[string]*ManagedService),
+		peers:      make(map[string]*node.Client),
+		peerStatus: make(map[string]bool),
+		logger:     slog.With("component", "daemon"),
 	}
 	for _, opt := range opts {
 		opt(d)
@@ -176,6 +181,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 	// Generate initial routing config
 	d.regenerateRouting()
+
+	// Start peer liveness checking
+	d.startPeerLiveness(ctx)
 
 	// Redeploy adopted services in the background to restore log capture
 	go d.redeployAdopted()
