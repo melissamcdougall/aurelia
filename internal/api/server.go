@@ -17,6 +17,7 @@ import (
 
 	"github.com/benaskins/aurelia/internal/daemon"
 	"github.com/benaskins/aurelia/internal/gpu"
+	"github.com/benaskins/aurelia/internal/node"
 )
 
 // Server serves the aurelia REST API over a Unix socket.
@@ -28,6 +29,7 @@ type Server struct {
 	tcpServer *http.Server // separate server for TCP with auth middleware
 	logger    *slog.Logger
 	token     string // bearer token for TCP auth (empty = no auth)
+	nodeName  string // local node name for stamping on service states
 }
 
 // NewServer creates an API server backed by the given daemon.
@@ -50,6 +52,10 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	mux.HandleFunc("POST /v1/reload", s.reload)
 	mux.HandleFunc("GET /v1/gpu", s.gpuInfo)
 	mux.HandleFunc("GET /v1/health", s.health)
+
+	// Cluster endpoints — aggregate across peers
+	mux.HandleFunc("GET /v1/cluster/services", s.clusterListServices)
+	mux.HandleFunc("POST /v1/cluster/services/{name}/{action}", s.clusterServiceAction)
 
 	s.server = &http.Server{
 		Handler:           mux,
@@ -301,4 +307,149 @@ func errorMessage(generic string, err error, r *http.Request) string {
 func isUnixSocket(r *http.Request) bool {
 	addr := r.RemoteAddr
 	return addr == "" || strings.HasPrefix(addr, "@")
+}
+
+// SetNodeName sets the local node name used to stamp service states.
+func (s *Server) SetNodeName(name string) {
+	s.nodeName = name
+}
+
+func (s *Server) clusterListServices(w http.ResponseWriter, r *http.Request) {
+	// Get local services and stamp node name
+	localStates := s.daemon.ServiceStates()
+	nodeName := s.nodeName
+	if nodeName == "" {
+		nodeName = "local"
+	}
+	for i := range localStates {
+		localStates[i].Node = nodeName
+	}
+
+	allStates := localStates
+
+	// Fan out to reachable peers in parallel
+	peers := s.daemon.Peers()
+	peerReachable := s.daemon.PeerStates()
+
+	type peerResult struct {
+		states []daemon.ServiceState
+		err    error
+	}
+	results := make(chan peerResult, len(peers))
+
+	for name, c := range peers {
+		if !peerReachable[name] {
+			continue
+		}
+		go func(name string, c *node.Client) {
+			raw, err := c.Status()
+			if err != nil {
+				results <- peerResult{err: err}
+				return
+			}
+			var states []daemon.ServiceState
+			if err := json.Unmarshal(raw, &states); err != nil {
+				results <- peerResult{err: fmt.Errorf("decoding %s: %w", name, err)}
+				return
+			}
+			// Stamp node name on each state
+			for i := range states {
+				if states[i].Node == "" {
+					states[i].Node = name
+				}
+			}
+			results <- peerResult{states: states}
+		}(name, c)
+	}
+
+	// Collect results
+	expected := 0
+	for name := range peers {
+		if peerReachable[name] {
+			expected++
+		}
+	}
+	for i := 0; i < expected; i++ {
+		res := <-results
+		if res.err != nil {
+			s.logger.Warn("failed to get peer status", "error", res.err)
+			continue
+		}
+		allStates = append(allStates, res.states...)
+	}
+
+	writeJSON(w, http.StatusOK, allStates)
+}
+
+func (s *Server) clusterServiceAction(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	action := r.PathValue("action")
+	targetNode := r.URL.Query().Get("node")
+
+	if targetNode == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "node query parameter required"})
+		return
+	}
+
+	// Route to local daemon if targeting self
+	nodeName := s.nodeName
+	if nodeName == "" {
+		nodeName = "local"
+	}
+	if targetNode == nodeName {
+		s.routeLocalAction(w, r, name, action)
+		return
+	}
+
+	// Find peer
+	peers := s.daemon.Peers()
+	peer, ok := peers[targetNode]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("node %q not found", targetNode)})
+		return
+	}
+
+	// Proxy to peer
+	var err error
+	switch action {
+	case "start":
+		err = peer.StartService(name)
+	case "stop":
+		err = peer.StopService(name)
+	case "restart":
+		err = peer.RestartService(name)
+	case "deploy":
+		err = peer.DeployService(name)
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("unknown action %q", action)})
+		return
+	}
+
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": action + "ing", "node": targetNode})
+}
+
+func (s *Server) routeLocalAction(w http.ResponseWriter, r *http.Request, name, action string) {
+	var err error
+	switch action {
+	case "start":
+		err = s.daemon.StartService(r.Context(), name)
+	case "stop":
+		err = s.daemon.StopService(name, daemon.DefaultStopTimeout)
+	case "restart":
+		err = s.daemon.RestartService(name, daemon.DefaultStopTimeout)
+	case "deploy":
+		err = s.daemon.DeployService(name, daemon.DefaultDrainTimeout)
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("unknown action %q", action)})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": action + "ing"})
 }

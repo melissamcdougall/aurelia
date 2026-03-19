@@ -26,6 +26,7 @@ type ServiceState struct {
 	RestartCount int           `json:"restart_count"`
 	LastExitCode int           `json:"last_exit_code,omitempty"`
 	LastError    string        `json:"last_error,omitempty"`
+	Node         string        `json:"node,omitempty"`
 }
 
 // ManagedService ties a spec to a running driver with restart and health monitoring.
