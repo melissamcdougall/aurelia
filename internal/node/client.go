@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -93,6 +94,30 @@ func (c *Client) Logs(name string, n int) ([]string, error) {
 	return resp.Lines, nil
 }
 
+// LaminaResponse is the response from a remote lamina command execution.
+type LaminaResponse struct {
+	ExitCode int              `json:"exit_code"`
+	Output   json.RawMessage  `json:"output,omitempty"`
+	Raw      string           `json:"raw,omitempty"`
+	Error    string           `json:"error,omitempty"`
+}
+
+// Lamina executes a lamina CLI command on the remote daemon.
+// The args are the subcommand and its arguments, e.g. ["repo", "fetch"].
+func (c *Client) Lamina(args []string) (*LaminaResponse, error) {
+	body, err := c.postJSON("/v1/lamina", map[string]any{"args": args})
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+
+	var resp LaminaResponse
+	if err := json.NewDecoder(body).Decode(&resp); err != nil {
+		return nil, fmt.Errorf("decoding lamina response from %s: %w", c.Name, err)
+	}
+	return &resp, nil
+}
+
 func (c *Client) get(path string) (io.ReadCloser, error) {
 	req, err := http.NewRequest("GET", "http://"+c.addr+path, nil)
 	if err != nil {
@@ -133,4 +158,32 @@ func (c *Client) post(path string) error {
 	}
 
 	return nil
+}
+
+func (c *Client) postJSON(path string, v any) (io.ReadCloser, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling request for %s: %w", c.Name, err)
+	}
+	req, err := http.NewRequest("POST", "http://"+c.addr+path, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("creating request for %s: %w", c.Name, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to %s (%s): %w", c.Name, c.addr, err)
+	}
+
+	// For lamina exec, 422 carries valid response data (non-zero exit).
+	// Only treat 4xx/5xx as errors when the body isn't a structured response.
+	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusUnprocessableEntity {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		return nil, fmt.Errorf("%s returned %d: %s", c.Name, resp.StatusCode, body)
+	}
+
+	return resp.Body, nil
 }

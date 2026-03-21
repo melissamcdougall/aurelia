@@ -132,6 +132,10 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	if cfg.NodeName != "" {
 		srv.SetNodeName(cfg.NodeName)
 	}
+	if cfg.LaminaRoot != "" {
+		srv.SetLaminaRoot(cfg.LaminaRoot)
+		slog.Info("lamina workspace configured", "root", cfg.LaminaRoot)
+	}
 
 	// Start API in background
 	errCh := make(chan error, 1)
@@ -180,9 +184,6 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 	srv.Shutdown(context.Background())
 	os.Remove(socketPath)
-	if apiAddr != "" {
-		os.Remove(filepath.Join(filepath.Dir(socketPath), "api.token"))
-	}
 
 	slog.Info("aurelia daemon stopped")
 	return nil

@@ -22,14 +22,15 @@ import (
 
 // Server serves the aurelia REST API over a Unix socket.
 type Server struct {
-	daemon    *daemon.Daemon
-	gpu       *gpu.Observer
-	listener  net.Listener
-	server    *http.Server
-	tcpServer *http.Server // separate server for TCP with auth middleware
-	logger    *slog.Logger
-	token     string // bearer token for TCP auth (empty = no auth)
-	nodeName  string // local node name for stamping on service states
+	daemon     *daemon.Daemon
+	gpu        *gpu.Observer
+	listener   net.Listener
+	server     *http.Server
+	tcpServer  *http.Server // separate server for TCP with auth middleware
+	logger     *slog.Logger
+	token      string // bearer token for TCP auth (empty = no auth)
+	nodeName   string // local node name for stamping on service states
+	laminaRoot string // workspace root for lamina CLI execution
 }
 
 // NewServer creates an API server backed by the given daemon.
@@ -56,6 +57,9 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	// Cluster endpoints — aggregate across peers
 	mux.HandleFunc("GET /v1/cluster/services", s.clusterListServices)
 	mux.HandleFunc("POST /v1/cluster/services/{name}/{action}", s.clusterServiceAction)
+
+	// Lamina workspace CLI execution
+	mux.HandleFunc("POST /v1/lamina", s.laminaExec)
 
 	s.server = &http.Server{
 		Handler:           mux,
@@ -323,6 +327,11 @@ func isUnixSocket(r *http.Request) bool {
 // SetNodeName sets the local node name used to stamp service states.
 func (s *Server) SetNodeName(name string) {
 	s.nodeName = name
+}
+
+// SetLaminaRoot sets the workspace root for lamina CLI execution.
+func (s *Server) SetLaminaRoot(root string) {
+	s.laminaRoot = root
 }
 
 func (s *Server) clusterListServices(w http.ResponseWriter, r *http.Request) {

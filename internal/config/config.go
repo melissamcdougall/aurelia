@@ -40,6 +40,7 @@ type Config struct {
 	APIAddr       string `yaml:"api_addr"`
 	NodeName      string `yaml:"node_name,omitempty"`
 	Nodes         []Node `yaml:"nodes,omitempty"`
+	LaminaRoot    string `yaml:"lamina_root,omitempty"`
 }
 
 // FindNode returns the node with the given name, or false if not found.
@@ -79,5 +80,6 @@ func Load(path string) (*Config, error) {
 	}
 	cfg.RoutingOutput = os.ExpandEnv(cfg.RoutingOutput)
 	cfg.APIAddr = os.ExpandEnv(cfg.APIAddr)
+	cfg.LaminaRoot = os.ExpandEnv(cfg.LaminaRoot)
 	return cfg, nil
 }
