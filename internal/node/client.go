@@ -94,6 +94,21 @@ func (c *Client) Logs(name string, n int) ([]string, error) {
 	return resp.Lines, nil
 }
 
+// Inspect returns the raw JSON inspect response for a service on the remote daemon.
+func (c *Client) Inspect(name string) (json.RawMessage, error) {
+	body, err := c.get("/v1/services/" + name + "/inspect")
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+
+	data, err := io.ReadAll(io.LimitReader(body, 10<<20))
+	if err != nil {
+		return nil, fmt.Errorf("reading inspect from %s: %w", c.Name, err)
+	}
+	return json.RawMessage(data), nil
+}
+
 // LaminaResponse is the response from a remote lamina command execution.
 type LaminaResponse struct {
 	ExitCode int              `json:"exit_code"`
