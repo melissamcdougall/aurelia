@@ -425,6 +425,15 @@ func (d *Daemon) ServiceState(name string) (ServiceState, error) {
 	return ms.State(), nil
 }
 
+// InspectService returns the full resolved config and runtime state of a service.
+func (d *Daemon) InspectService(name string) (ServiceInspect, error) {
+	ms, err := d.getService(name)
+	if err != nil {
+		return ServiceInspect{}, err
+	}
+	return ms.Inspect(), nil
+}
+
 // Reload re-reads specs and reconciles: start new, stop removed, restart changed.
 // It uses the daemon's lifecycle context for starting services so they outlive
 // short-lived request contexts.

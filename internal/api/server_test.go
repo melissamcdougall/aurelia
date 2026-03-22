@@ -159,6 +159,60 @@ service:
 	}
 }
 
+func TestInspectService(t *testing.T) {
+	_, client := setupTestServer(t, map[string]string{
+		"svc.yaml": `
+service:
+  name: my-svc
+  type: native
+  command: "sleep 30"
+network:
+  port: 0
+routing:
+  hostname: my-svc.hestia.internal
+  tls: true
+env:
+  BASE_CURRENCY: AUD
+`,
+	})
+
+	resp, err := client.Get("http://aurelia/v1/services/my-svc/inspect")
+	if err != nil {
+		t.Fatalf("GET /v1/services/my-svc/inspect: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var si daemon.ServiceInspect
+	json.NewDecoder(resp.Body).Decode(&si)
+	if si.Name != "my-svc" {
+		t.Errorf("name = %q, want my-svc", si.Name)
+	}
+	if si.Command != "sleep 30" {
+		t.Errorf("command = %q, want sleep 30", si.Command)
+	}
+	if si.Env["BASE_CURRENCY"] != "AUD" {
+		t.Errorf("env BASE_CURRENCY = %q, want AUD", si.Env["BASE_CURRENCY"])
+	}
+	if si.Routing == nil || si.Routing.Hostname != "my-svc.hestia.internal" {
+		t.Errorf("routing = %v, want hostname my-svc.hestia.internal", si.Routing)
+	}
+
+	// Non-existent service
+	resp2, err := client.Get("http://aurelia/v1/services/nope/inspect")
+	if err != nil {
+		t.Fatalf("GET /v1/services/nope/inspect: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != 404 {
+		t.Errorf("expected 404, got %d", resp2.StatusCode)
+	}
+}
+
 func TestStopStartService(t *testing.T) {
 	_, client := setupTestServer(t, map[string]string{
 		"svc.yaml": `

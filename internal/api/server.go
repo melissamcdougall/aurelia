@@ -44,6 +44,7 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/services", s.listServices)
+	mux.HandleFunc("GET /v1/services/{name}/inspect", s.inspectService)
 	mux.HandleFunc("GET /v1/services/{name}", s.getService)
 	mux.HandleFunc("POST /v1/services/{name}/start", s.startService)
 	mux.HandleFunc("POST /v1/services/{name}/stop", s.stopService)
@@ -191,6 +192,17 @@ func (s *Server) getService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, state)
+}
+
+func (s *Server) inspectService(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	inspect, err := s.daemon.InspectService(name)
+	if err != nil {
+		s.logger.Warn("inspectService: service not found", "service", name, "error", err)
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": errorMessage("service not found", err, r)})
+		return
+	}
+	writeJSON(w, http.StatusOK, inspect)
 }
 
 func (s *Server) isExternalGuard(w http.ResponseWriter, name, action string) bool {
