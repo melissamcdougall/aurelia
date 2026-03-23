@@ -89,7 +89,7 @@ func runStep(name, dir, command string) ShipStep {
 	slog.Info("ship: running step", "step", name, "command", command, "dir", dir)
 	start := time.Now()
 
-	cmd := exec.Command("sh", "-c", command)
+	cmd := exec.Command("bash", "-l", "-c", command)
 	if dir != "" {
 		cmd.Dir = dir
 	}
