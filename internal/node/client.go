@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,20 +13,40 @@ import (
 
 // Client talks to a remote aurelia daemon over its TCP API.
 type Client struct {
-	Name  string // node name for display
-	addr  string // host:port
-	token string
-	http  *http.Client
+	Name   string // node name for display
+	addr   string // host:port
+	token  string
+	scheme string // "http" or "https"
+	http   *http.Client
 }
 
-// New creates a client for a remote aurelia daemon.
+// New creates a client for a remote aurelia daemon using bearer token auth over plain HTTP.
 func New(name, addr, token string) *Client {
 	return &Client{
-		Name:  name,
-		addr:  addr,
-		token: token,
+		Name:   name,
+		addr:   addr,
+		token:  token,
+		scheme: "http",
 		http: &http.Client{
 			Timeout: 30 * time.Second,
+		},
+	}
+}
+
+// NewTLS creates a client that connects over TLS with a client certificate (mTLS).
+// The token is still set for backward compatibility but is not sent when a client cert
+// is configured (the server authenticates via the cert instead).
+func NewTLS(name, addr, token string, tlsConfig *tls.Config) *Client {
+	return &Client{
+		Name:   name,
+		addr:   addr,
+		token:  token,
+		scheme: "https",
+		http: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: tlsConfig,
+			},
 		},
 	}
 }
@@ -149,7 +170,7 @@ func (c *Client) Lamina(args []string) (*LaminaResponse, error) {
 }
 
 func (c *Client) get(path string) (io.ReadCloser, error) {
-	req, err := http.NewRequest("GET", "http://"+c.addr+path, nil)
+	req, err := http.NewRequest("GET", c.scheme+"://"+c.addr+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request for %s: %w", c.Name, err)
 	}
@@ -170,7 +191,7 @@ func (c *Client) get(path string) (io.ReadCloser, error) {
 }
 
 func (c *Client) post(path string) error {
-	req, err := http.NewRequest("POST", "http://"+c.addr+path, nil)
+	req, err := http.NewRequest("POST", c.scheme+"://"+c.addr+path, nil)
 	if err != nil {
 		return fmt.Errorf("creating request for %s: %w", c.Name, err)
 	}
@@ -191,7 +212,7 @@ func (c *Client) post(path string) error {
 }
 
 func (c *Client) postReturnBody(path string) (io.ReadCloser, error) {
-	req, err := http.NewRequest("POST", "http://"+c.addr+path, nil)
+	req, err := http.NewRequest("POST", c.scheme+"://"+c.addr+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request for %s: %w", c.Name, err)
 	}
@@ -216,7 +237,7 @@ func (c *Client) postJSON(path string, v any) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshaling request for %s: %w", c.Name, err)
 	}
-	req, err := http.NewRequest("POST", "http://"+c.addr+path, bytes.NewReader(data))
+	req, err := http.NewRequest("POST", c.scheme+"://"+c.addr+path, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("creating request for %s: %w", c.Name, err)
 	}

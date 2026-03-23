@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/tls"
 	"log/slog"
 	"time"
 
@@ -25,7 +26,8 @@ func WithPeers(peers []*node.Client) Option {
 }
 
 // BuildPeers creates node.Client instances from config, excluding the local node.
-func BuildPeers(cfg *config.Config) []*node.Client {
+// If tlsConfig is non-nil, peers connect over TLS with the provided client cert.
+func BuildPeers(cfg *config.Config, tlsConfig *tls.Config) []*node.Client {
 	var peers []*node.Client
 	for _, n := range cfg.Nodes {
 		if n.Name == cfg.NodeName {
@@ -36,7 +38,11 @@ func BuildPeers(cfg *config.Config) []*node.Client {
 			slog.Warn("skipping peer node, no token", "node", n.Name, "error", err)
 			continue
 		}
-		peers = append(peers, node.New(n.Name, n.Addr, token))
+		if tlsConfig != nil {
+			peers = append(peers, node.NewTLS(n.Name, n.Addr, token, tlsConfig))
+		} else {
+			peers = append(peers, node.New(n.Name, n.Addr, token))
+		}
 	}
 	return peers
 }

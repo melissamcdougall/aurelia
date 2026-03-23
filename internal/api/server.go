@@ -179,6 +179,30 @@ func LoadTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
 	}, nil
 }
 
+// LoadPeerTLSConfig creates a tls.Config for outbound peer connections (mTLS client).
+// Uses the same cert/key as the server to authenticate as a peer.
+func LoadPeerTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("loading client cert/key: %w", err)
+	}
+
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("reading CA cert: %w", err)
+	}
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("CA cert file contains no valid certificates")
+	}
+
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      caPool,
+		MinVersion:   tls.VersionTLS13,
+	}, nil
+}
+
 // ListenTLS starts the server on a TLS-encrypted TCP address.
 // Clients presenting a valid client certificate (mTLS) are authenticated by cert CN.
 // Clients without a client certificate must provide a bearer token.

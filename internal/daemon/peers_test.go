@@ -69,7 +69,7 @@ func TestBuildPeersFromConfig(t *testing.T) {
 		},
 	}
 
-	peers := BuildPeers(cfg)
+	peers := BuildPeers(cfg, nil)
 	if len(peers) != 1 {
 		t.Fatalf("len(peers) = %d, want 1 (self excluded)", len(peers))
 	}

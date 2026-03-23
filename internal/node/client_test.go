@@ -1,6 +1,7 @@
 package node
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -154,5 +155,21 @@ func TestClientConnectionError(t *testing.T) {
 	c := New("test-node", "127.0.0.1:1", "tok") // nothing listening
 	if err := c.Health(); err == nil {
 		t.Error("expected error for connection failure")
+	}
+}
+
+func TestNewTLSUsesHTTPS(t *testing.T) {
+	t.Parallel()
+	c := NewTLS("test-node", "example.com:9090", "tok", &tls.Config{})
+	if c.scheme != "https" {
+		t.Errorf("scheme = %q, want %q", c.scheme, "https")
+	}
+}
+
+func TestNewUsesHTTP(t *testing.T) {
+	t.Parallel()
+	c := New("test-node", "example.com:9090", "tok")
+	if c.scheme != "http" {
+		t.Errorf("scheme = %q, want %q", c.scheme, "http")
 	}
 }

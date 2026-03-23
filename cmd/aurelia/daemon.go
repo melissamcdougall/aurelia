@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	crypto_tls "crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -9,7 +10,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-
 	"time"
 
 	"github.com/benaskins/aurelia/internal/api"
@@ -94,9 +94,25 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		opts = append(opts, daemon.WithRouting(routingOutput))
 		slog.Info("routing enabled", "output", routingOutput)
 	}
+	// Load TLS config if configured (used for both peer connections and TCP listener)
+	var serverTLS *crypto_tls.Config
+	var peerTLS *crypto_tls.Config
+	if cfg.TLS.Configured() {
+		serverTLS, err = api.LoadTLSConfig(cfg.TLS.Cert, cfg.TLS.Key, cfg.TLS.CA)
+		if err != nil {
+			return fmt.Errorf("loading TLS config: %w", err)
+		}
+		// Peer TLS uses the same cert/key as client cert for mTLS
+		peerTLS, err = api.LoadPeerTLSConfig(cfg.TLS.Cert, cfg.TLS.Key, cfg.TLS.CA)
+		if err != nil {
+			return fmt.Errorf("loading peer TLS config: %w", err)
+		}
+		slog.Info("TLS configured for API and peer connections")
+	}
+
 	// Wire up peer nodes from config
 	if len(cfg.Nodes) > 0 {
-		peers := daemon.BuildPeers(cfg)
+		peers := daemon.BuildPeers(cfg, peerTLS)
 		if len(peers) > 0 {
 			opts = append(opts, daemon.WithPeers(peers))
 			slog.Info("peer nodes configured", "count", len(peers))
@@ -143,17 +159,26 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		errCh <- srv.ListenUnix(socketPath)
 	}()
 
-	// Optionally start TCP API with bearer token auth
+	// Optionally start TCP API with auth
 	if apiAddr != "" {
 		tokenPath := filepath.Join(filepath.Dir(socketPath), "api.token")
 		if err := srv.GenerateToken(tokenPath); err != nil {
 			return fmt.Errorf("generating API token: %w", err)
 		}
-		go func() {
-			if err := srv.ListenTCP(apiAddr); err != nil {
-				slog.Error("TCP API error", "error", err)
-			}
-		}()
+		if serverTLS != nil {
+			go func() {
+				if err := srv.ListenTLS(apiAddr, serverTLS); err != nil {
+					slog.Error("TLS API error", "error", err)
+				}
+			}()
+		} else {
+			slog.Warn("TCP API running without TLS, bearer token sent in plaintext")
+			go func() {
+				if err := srv.ListenTCP(apiAddr); err != nil {
+					slog.Error("TCP API error", "error", err)
+				}
+			}()
+		}
 	}
 
 	slog.Info("aurelia daemon ready")
