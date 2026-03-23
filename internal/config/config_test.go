@@ -347,6 +347,58 @@ nodes:
 	}
 }
 
+func TestLoadDiagnoseConfig(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `diagnose:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  api_key_secret: anthropic-api-key
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Diagnose == nil {
+		t.Fatal("expected Diagnose config to be present")
+	}
+	if cfg.Diagnose.Provider != "anthropic" {
+		t.Errorf("Provider = %q, want %q", cfg.Diagnose.Provider, "anthropic")
+	}
+	if cfg.Diagnose.Model != "claude-sonnet-4-20250514" {
+		t.Errorf("Model = %q, want %q", cfg.Diagnose.Model, "claude-sonnet-4-20250514")
+	}
+	if cfg.Diagnose.APIKeySecret != "anthropic-api-key" {
+		t.Errorf("APIKeySecret = %q, want %q", cfg.Diagnose.APIKeySecret, "anthropic-api-key")
+	}
+}
+
+func TestLoadNoDiagnoseConfig(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `api_addr: 127.0.0.1:9090
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Diagnose != nil {
+		t.Errorf("expected Diagnose to be nil when not configured, got %+v", cfg.Diagnose)
+	}
+}
+
 func TestLoadCommentsOnly(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

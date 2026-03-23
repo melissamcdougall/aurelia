@@ -69,15 +69,23 @@ func (o OpenBao) LoadToken() (string, error) {
 	return "", fmt.Errorf("no openbao token: set token_file in config or BAO_TOKEN env var")
 }
 
+// Diagnose configures the LLM-powered diagnostic engine.
+type Diagnose struct {
+	Provider     string `yaml:"provider"`       // LLM provider: "anthropic", "ollama", "openai"
+	Model        string `yaml:"model"`          // model name, e.g. "claude-sonnet-4-20250514"
+	APIKeySecret string `yaml:"api_key_secret"` // secret name for the API key (resolved via aurelia secret)
+}
+
 // Config holds persistent daemon configuration loaded from ~/.aurelia/config.yaml.
 type Config struct {
-	RoutingOutput string   `yaml:"routing_output"`
-	APIAddr       string   `yaml:"api_addr"`
-	NodeName      string   `yaml:"node_name,omitempty"`
-	Nodes         []Node   `yaml:"nodes,omitempty"`
-	LaminaRoot    string   `yaml:"lamina_root,omitempty"`
-	TLS           *TLS     `yaml:"tls,omitempty"`
-	OpenBao       *OpenBao `yaml:"openbao,omitempty"`
+	RoutingOutput string    `yaml:"routing_output"`
+	APIAddr       string    `yaml:"api_addr"`
+	NodeName      string    `yaml:"node_name,omitempty"`
+	Nodes         []Node    `yaml:"nodes,omitempty"`
+	LaminaRoot    string    `yaml:"lamina_root,omitempty"`
+	TLS           *TLS      `yaml:"tls,omitempty"`
+	OpenBao       *OpenBao  `yaml:"openbao,omitempty"`
+	Diagnose      *Diagnose `yaml:"diagnose,omitempty"`
 }
 
 // FindNode returns the node with the given name, or false if not found.
