@@ -30,6 +30,7 @@ func ReadTools(client APIClient) map[string]tool.ToolDef {
 		"test_health_check":        testHealthCheckTool(client),
 		"get_health_check_history": getHealthCheckHistoryTool(client),
 		"get_service_dependencies": getServiceDependenciesTool(client),
+		"get_system_resources":     getSystemResourcesTool(client),
 	}
 }
 
@@ -231,6 +232,20 @@ func getServiceDependenciesTool(client APIClient) tool.ToolDef {
 		Execute: func(ctx *tool.ToolContext, args map[string]any) tool.ToolResult {
 			name, _ := args["name"].(string)
 			return tool.ToolResult{Content: apiGet(client, "/v1/services/"+name+"/deps")}
+		},
+	}
+}
+
+func getSystemResourcesTool(client APIClient) tool.ToolDef {
+	return tool.ToolDef{
+		Name:        "get_system_resources",
+		Description: "Get system resource usage: CPU load averages, memory usage (total, used, percent), and disk usage (total, used, available, percent).",
+		Parameters: tool.ParameterSchema{
+			Type:       "object",
+			Properties: map[string]tool.PropertySchema{},
+		},
+		Execute: func(ctx *tool.ToolContext, args map[string]any) tool.ToolResult {
+			return tool.ToolResult{Content: apiGet(client, "/v1/system")}
 		},
 	}
 }

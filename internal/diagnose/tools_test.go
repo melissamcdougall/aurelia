@@ -34,7 +34,7 @@ func TestReadToolsReturnsAllTools(t *testing.T) {
 	client := setupTestAPI(t, http.NotFoundHandler())
 	tools := ReadTools(client)
 
-	expected := []string{"list_services", "get_service", "inspect_service", "get_logs", "get_gpu", "cluster_services", "test_health_check", "get_health_check_history", "get_service_dependencies"}
+	expected := []string{"list_services", "get_service", "inspect_service", "get_logs", "get_gpu", "cluster_services", "test_health_check", "get_health_check_history", "get_service_dependencies", "get_system_resources"}
 	for _, name := range expected {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("missing tool %q", name)
@@ -63,8 +63,8 @@ func TestAllToolsCombinesReadAndAction(t *testing.T) {
 	client := setupTestAPI(t, http.NotFoundHandler())
 	tools := AllTools(client, nil)
 
-	if len(tools) != 12 {
-		t.Errorf("got %d tools, want 12", len(tools))
+	if len(tools) != 13 {
+		t.Errorf("got %d tools, want 13", len(tools))
 	}
 }
 

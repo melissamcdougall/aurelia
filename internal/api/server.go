@@ -23,6 +23,7 @@ import (
 	"github.com/benaskins/aurelia/internal/gpu"
 	"github.com/benaskins/aurelia/internal/health"
 	"github.com/benaskins/aurelia/internal/node"
+	"github.com/benaskins/aurelia/internal/sysinfo"
 )
 
 // Server serves the aurelia REST API over a Unix socket.
@@ -67,6 +68,7 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	mux.HandleFunc("GET /v1/services/{name}/logs", s.serviceLogs)
 	mux.HandleFunc("POST /v1/reload", s.reload)
 	mux.HandleFunc("GET /v1/gpu", s.gpuInfo)
+	mux.HandleFunc("GET /v1/system", s.systemInfo)
 	mux.HandleFunc("GET /v1/health", s.health)
 
 	// Cluster endpoints — aggregate across peers
@@ -587,6 +589,15 @@ func (s *Server) gpuInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.gpu.Info())
+}
+
+func (s *Server) systemInfo(w http.ResponseWriter, r *http.Request) {
+	snap, err := sysinfo.Snapshot()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, snap)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
