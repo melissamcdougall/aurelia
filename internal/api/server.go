@@ -531,6 +531,8 @@ func (s *Server) SetLaminaRoot(root string) {
 	s.laminaRoot = root
 }
 
+const clusterAggregationTimeout = 10 * time.Second
+
 func (s *Server) clusterListServices(w http.ResponseWriter, r *http.Request) {
 	// Get local services and stamp node name
 	localStates := s.daemon.ServiceStates()
@@ -544,58 +546,67 @@ func (s *Server) clusterListServices(w http.ResponseWriter, r *http.Request) {
 
 	allStates := localStates
 
-	// Fan out to reachable peers in parallel
+	// Fan out to reachable peers with an overall deadline
+	ctx, cancel := context.WithTimeout(r.Context(), clusterAggregationTimeout)
+	defer cancel()
+
 	peers := s.daemon.Peers()
 	peerReachable := s.daemon.PeerStates()
+	peerStatus := make(map[string]string) // peer name -> "ok", "timeout", "error", "unreachable"
 
 	type peerResult struct {
+		name   string
 		states []daemon.ServiceState
 		err    error
 	}
 	results := make(chan peerResult, len(peers))
 
+	expected := 0
 	for name, c := range peers {
 		if !peerReachable[name] {
+			peerStatus[name] = "unreachable"
 			continue
 		}
+		expected++
 		go func(name string, c *node.Client) {
-			raw, err := c.Status()
+			raw, err := c.StatusContext(ctx)
 			if err != nil {
-				results <- peerResult{err: err}
+				results <- peerResult{name: name, err: err}
 				return
 			}
 			var states []daemon.ServiceState
 			if err := json.Unmarshal(raw, &states); err != nil {
-				results <- peerResult{err: fmt.Errorf("decoding %s: %w", name, err)}
+				results <- peerResult{name: name, err: fmt.Errorf("decoding %s: %w", name, err)}
 				return
 			}
-			// Stamp node name on each state
 			for i := range states {
 				if states[i].Node == "" {
 					states[i].Node = name
 				}
 			}
-			results <- peerResult{states: states}
+			results <- peerResult{name: name, states: states}
 		}(name, c)
 	}
 
-	// Collect results
-	expected := 0
-	for name := range peers {
-		if peerReachable[name] {
-			expected++
-		}
-	}
 	for i := 0; i < expected; i++ {
 		res := <-results
 		if res.err != nil {
-			s.logger.Warn("failed to get peer status", "error", res.err)
+			if ctx.Err() != nil {
+				peerStatus[res.name] = "timeout"
+			} else {
+				peerStatus[res.name] = "error"
+			}
+			s.logger.Warn("failed to get peer status", "peer", res.name, "error", res.err)
 			continue
 		}
+		peerStatus[res.name] = "ok"
 		allStates = append(allStates, res.states...)
 	}
 
-	writeJSON(w, http.StatusOK, allStates)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"services": allStates,
+		"peers":    peerStatus,
+	})
 }
 
 func (s *Server) clusterServiceAction(w http.ResponseWriter, r *http.Request) {

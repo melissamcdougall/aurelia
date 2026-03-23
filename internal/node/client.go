@@ -2,6 +2,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -60,13 +61,29 @@ func (c *Client) Health() error {
 // Status returns the raw JSON service states from the remote daemon.
 // Callers decode into their own type to avoid import cycles.
 func (c *Client) Status() (json.RawMessage, error) {
-	body, err := c.get("/v1/services")
-	if err != nil {
-		return nil, err
-	}
-	defer body.Close()
+	return c.StatusContext(context.Background())
+}
 
-	data, err := io.ReadAll(io.LimitReader(body, 10<<20))
+// StatusContext returns service states, respecting the provided context deadline.
+func (c *Client) StatusContext(ctx context.Context) (json.RawMessage, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.scheme+"://"+c.addr+"/v1/services", nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request for %s: %w", c.Name, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("connecting to %s (%s): %w", c.Name, c.addr, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return nil, fmt.Errorf("%s returned %d: %s", c.Name, resp.StatusCode, body)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return nil, fmt.Errorf("reading status from %s: %w", c.Name, err)
 	}

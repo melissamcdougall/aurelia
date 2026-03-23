@@ -615,12 +615,15 @@ service:
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var states []daemon.ServiceState
-	json.NewDecoder(resp.Body).Decode(&states)
+	var clusterResp struct {
+		Services []daemon.ServiceState `json:"services"`
+		Peers    map[string]string     `json:"peers"`
+	}
+	json.NewDecoder(resp.Body).Decode(&clusterResp)
 
 	// Should have both local and remote services
 	names := make(map[string]bool)
-	for _, s := range states {
+	for _, s := range clusterResp.Services {
 		names[s.Name] = true
 	}
 	if !names["local-svc"] {
@@ -631,10 +634,15 @@ service:
 	}
 
 	// Local service should have node stamped
-	for _, s := range states {
+	for _, s := range clusterResp.Services {
 		if s.Name == "local-svc" && s.Node == "" {
 			t.Error("expected local-svc to have Node field set")
 		}
+	}
+
+	// Peers should have status
+	if clusterResp.Peers["limen"] != "ok" {
+		t.Errorf("peer limen status = %q, want %q", clusterResp.Peers["limen"], "ok")
 	}
 }
 

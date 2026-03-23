@@ -130,11 +130,17 @@ var statusCmd = &cobra.Command{
 			}
 		} else {
 			// Use cluster endpoint to aggregate all nodes
-			if err := apiGet("/v1/cluster/services", &states); err != nil {
+			var clusterResp struct {
+				Services []daemon.ServiceState `json:"services"`
+				Peers    map[string]string     `json:"peers"`
+			}
+			if err := apiGet("/v1/cluster/services", &clusterResp); err != nil {
 				// Fall back to local-only if cluster endpoint not available
 				if err := apiGet("/v1/services", &states); err != nil {
 					return err
 				}
+			} else {
+				states = clusterResp.Services
 			}
 		}
 
