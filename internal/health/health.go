@@ -41,6 +41,16 @@ type Result struct {
 	Message string
 }
 
+// CheckRecord is a timestamped health check result stored in the history buffer.
+type CheckRecord struct {
+	Timestamp time.Time     `json:"timestamp"`
+	Status    Status        `json:"status"`
+	Latency   time.Duration `json:"latency"`
+	Error     string        `json:"error,omitempty"`
+}
+
+const historySize = 50
+
 // Monitor runs periodic health checks and tracks state.
 type Monitor struct {
 	cfg        Config
@@ -52,6 +62,9 @@ type Monitor struct {
 	consecutiveFails int
 	cancel           context.CancelFunc
 	done             chan struct{}
+	history          []CheckRecord
+	historyIdx       int
+	historyFull      bool
 
 	// onUnhealthy is called when the service transitions to unhealthy.
 	onUnhealthy func()
@@ -71,6 +84,7 @@ func NewMonitor(cfg Config, logger *slog.Logger, onUnhealthy func()) *Monitor {
 		httpClient:  &http.Client{Timeout: cfg.Timeout},
 		status:      StatusUnknown,
 		onUnhealthy: onUnhealthy,
+		history:     make([]CheckRecord, historySize),
 	}
 }
 
@@ -103,6 +117,33 @@ func (m *Monitor) CurrentStatus() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.status
+}
+
+// History returns the recent health check records in chronological order (oldest first).
+func (m *Monitor) History() []CheckRecord {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.historyFull {
+		result := make([]CheckRecord, m.historyIdx)
+		copy(result, m.history[:m.historyIdx])
+		return result
+	}
+
+	result := make([]CheckRecord, historySize)
+	// Ring buffer: entries from historyIdx..end are oldest, then 0..historyIdx-1
+	n := copy(result, m.history[m.historyIdx:])
+	copy(result[n:], m.history[:m.historyIdx])
+	return result
+}
+
+func (m *Monitor) recordCheck(record CheckRecord) {
+	m.history[m.historyIdx] = record
+	m.historyIdx++
+	if m.historyIdx >= historySize {
+		m.historyIdx = 0
+		m.historyFull = true
+	}
 }
 
 func (m *Monitor) run(ctx context.Context) {
@@ -144,6 +185,7 @@ func (m *Monitor) check(ctx context.Context) {
 
 	var result Result
 
+	start := time.Now()
 	var err error
 	switch m.cfg.Type {
 	case "http":
@@ -155,6 +197,7 @@ func (m *Monitor) check(ctx context.Context) {
 	default:
 		err = fmt.Errorf("unknown health check type: %s", m.cfg.Type)
 	}
+	latency := time.Since(start)
 
 	// Don't record results from cancelled context — the monitor is shutting down
 	if ctx.Err() != nil {
@@ -169,7 +212,17 @@ func (m *Monitor) check(ctx context.Context) {
 		result.Message = "ok"
 	}
 
+	record := CheckRecord{
+		Timestamp: start,
+		Status:    result.Status,
+		Latency:   latency,
+	}
+	if err != nil {
+		record.Error = err.Error()
+	}
+
 	m.mu.Lock()
+	m.recordCheck(record)
 	prevStatus := m.status
 
 	if result.Status == StatusHealthy {

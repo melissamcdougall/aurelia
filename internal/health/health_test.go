@@ -721,3 +721,107 @@ func TestSingleCheckUnknownType(t *testing.T) {
 		t.Error("expected error for unknown type")
 	}
 }
+
+func TestHistoryRecordsChecks(t *testing.T) {
+	cfg := Config{
+		Type:               "exec",
+		Command:            "true",
+		Interval:           50 * time.Millisecond,
+		Timeout:            2 * time.Second,
+		UnhealthyThreshold: 3,
+	}
+
+	m := NewMonitor(cfg, testLogger(), nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m.Start(ctx)
+	time.Sleep(200 * time.Millisecond)
+	m.Stop()
+
+	history := m.History()
+	if len(history) == 0 {
+		t.Fatal("expected history entries, got none")
+	}
+
+	for i, entry := range history {
+		if entry.Status != StatusHealthy {
+			t.Errorf("entry %d: expected healthy, got %v", i, entry.Status)
+		}
+		if entry.Timestamp.IsZero() {
+			t.Errorf("entry %d: expected non-zero timestamp", i)
+		}
+		if entry.Latency <= 0 {
+			t.Errorf("entry %d: expected positive latency, got %v", i, entry.Latency)
+		}
+	}
+}
+
+func TestHistoryRecordsFailures(t *testing.T) {
+	cfg := Config{
+		Type:               "exec",
+		Command:            "false",
+		Interval:           50 * time.Millisecond,
+		Timeout:            2 * time.Second,
+		UnhealthyThreshold: 2,
+	}
+
+	m := NewMonitor(cfg, testLogger(), nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m.Start(ctx)
+	time.Sleep(200 * time.Millisecond)
+	m.Stop()
+
+	history := m.History()
+	if len(history) == 0 {
+		t.Fatal("expected history entries, got none")
+	}
+
+	for i, entry := range history {
+		if entry.Status != StatusUnhealthy {
+			t.Errorf("entry %d: expected unhealthy, got %v", i, entry.Status)
+		}
+		if entry.Error == "" {
+			t.Errorf("entry %d: expected error message", i)
+		}
+	}
+}
+
+func TestHistoryRingBufferCapacity(t *testing.T) {
+	cfg := Config{
+		Type:               "exec",
+		Command:            "true",
+		Interval:           10 * time.Millisecond,
+		Timeout:            2 * time.Second,
+		UnhealthyThreshold: 3,
+	}
+
+	m := NewMonitor(cfg, testLogger(), nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m.Start(ctx)
+	// Run enough checks to exceed the buffer size (50)
+	time.Sleep(700 * time.Millisecond)
+	m.Stop()
+
+	history := m.History()
+	if len(history) > 50 {
+		t.Errorf("expected at most 50 history entries, got %d", len(history))
+	}
+	if len(history) < 10 {
+		t.Errorf("expected at least 10 history entries, got %d", len(history))
+	}
+
+	// Entries should be in chronological order (oldest first)
+	for i := 1; i < len(history); i++ {
+		if history[i].Timestamp.Before(history[i-1].Timestamp) {
+			t.Errorf("history not in chronological order at index %d", i)
+		}
+	}
+}
