@@ -34,7 +34,7 @@ func TestReadToolsReturnsAllTools(t *testing.T) {
 	client := setupTestAPI(t, http.NotFoundHandler())
 	tools := ReadTools(client)
 
-	expected := []string{"list_services", "get_service", "inspect_service", "get_logs", "get_gpu", "cluster_services", "test_health_check", "get_health_check_history"}
+	expected := []string{"list_services", "get_service", "inspect_service", "get_logs", "get_gpu", "cluster_services", "test_health_check", "get_health_check_history", "get_service_dependencies"}
 	for _, name := range expected {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("missing tool %q", name)
@@ -63,8 +63,8 @@ func TestAllToolsCombinesReadAndAction(t *testing.T) {
 	client := setupTestAPI(t, http.NotFoundHandler())
 	tools := AllTools(client, nil)
 
-	if len(tools) != 11 {
-		t.Errorf("got %d tools, want 11", len(tools))
+	if len(tools) != 12 {
+		t.Errorf("got %d tools, want 12", len(tools))
 	}
 }
 
@@ -333,6 +333,31 @@ func TestHealthCheckTools(t *testing.T) {
 	result = tools["get_health_check_history"].Execute(nil, map[string]any{"name": "chat"})
 	if !contains(result.Content, "connection refused") {
 		t.Errorf("get_health_check_history: expected error detail in result, got %q", result.Content)
+	}
+}
+
+func TestGetServiceDependenciesTool(t *testing.T) {
+	t.Parallel()
+
+	depsResp := map[string]any{
+		"after":          []string{"db"},
+		"requires":       []string{"db"},
+		"dependents":     []string{},
+		"cascade_impact": []string{},
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/services/app/deps", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(depsResp)
+	})
+
+	client := setupTestAPI(t, mux)
+	tools := ReadTools(client)
+
+	result := tools["get_service_dependencies"].Execute(nil, map[string]any{"name": "app"})
+	if !contains(result.Content, "db") {
+		t.Errorf("expected 'db' in deps result, got %q", result.Content)
 	}
 }
 

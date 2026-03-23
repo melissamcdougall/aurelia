@@ -27,8 +27,9 @@ func ReadTools(client APIClient) map[string]tool.ToolDef {
 		"get_logs":               getLogsTool(client),
 		"get_gpu":                getGPUTool(client),
 		"cluster_services":       clusterServicesTool(client),
-		"test_health_check":      testHealthCheckTool(client),
+		"test_health_check":        testHealthCheckTool(client),
 		"get_health_check_history": getHealthCheckHistoryTool(client),
+		"get_service_dependencies": getServiceDependenciesTool(client),
 	}
 }
 
@@ -212,6 +213,24 @@ func getHealthCheckHistoryTool(client APIClient) tool.ToolDef {
 		Execute: func(ctx *tool.ToolContext, args map[string]any) tool.ToolResult {
 			name, _ := args["name"].(string)
 			return tool.ToolResult{Content: apiGet(client, "/v1/services/"+name+"/health")}
+		},
+	}
+}
+
+func getServiceDependenciesTool(client APIClient) tool.ToolDef {
+	return tool.ToolDef{
+		Name:        "get_service_dependencies",
+		Description: "Get dependency information for a service: what it depends on (after, requires), what depends on it (dependents), and the cascading impact if it goes down (cascade_impact).",
+		Parameters: tool.ParameterSchema{
+			Type:     "object",
+			Required: []string{"name"},
+			Properties: map[string]tool.PropertySchema{
+				"name": {Type: "string", Description: "Name of the service"},
+			},
+		},
+		Execute: func(ctx *tool.ToolContext, args map[string]any) tool.ToolResult {
+			name, _ := args["name"].(string)
+			return tool.ToolResult{Content: apiGet(client, "/v1/services/"+name+"/deps")}
 		},
 	}
 }
