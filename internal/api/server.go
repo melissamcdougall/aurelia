@@ -141,9 +141,9 @@ func (s *Server) ListenTCP(addr string) error {
 	}
 	s.logger.Info("API listening", "addr", addr)
 
-	// Wrap with auth middleware for TCP connections
+	// Wrap with auth + audit middleware for TCP connections
 	s.tcpServer = &http.Server{
-		Handler:           s.requireToken(s.server.Handler),
+		Handler:           s.requireToken(s.auditLog(s.server.Handler)),
 		ReadTimeout:       s.server.ReadTimeout,
 		WriteTimeout:      s.server.WriteTimeout,
 		ReadHeaderTimeout: s.server.ReadHeaderTimeout,
@@ -227,7 +227,7 @@ func (s *Server) ListenTLS(addr string, tlsConfig *tls.Config) error {
 	s.logger.Info("API listening (TLS)", "addr", addr)
 
 	s.tcpServer = &http.Server{
-		Handler:           s.requireAuth(s.server.Handler),
+		Handler:           s.requireAuth(s.auditLog(s.server.Handler)),
 		ReadTimeout:       s.server.ReadTimeout,
 		WriteTimeout:      s.server.WriteTimeout,
 		ReadHeaderTimeout: s.server.ReadHeaderTimeout,
@@ -277,6 +277,44 @@ func PeerIdentity(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// auditLog returns middleware that logs every request with peer identity, method, path,
+// status code, and duration.
+func (s *Server) auditLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(sw, r)
+
+		peer := PeerIdentity(r.Context())
+		if peer == "" {
+			peer = "unknown"
+		}
+		s.logger.Info("api.request",
+			"peer", peer,
+			"remote_addr", r.RemoteAddr,
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", sw.status,
+			"duration_ms", time.Since(start).Milliseconds(),
+		)
+	})
+}
+
+// statusWriter wraps http.ResponseWriter to capture the status code.
+type statusWriter struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	if !w.wroteHeader {
+		w.status = code
+		w.wroteHeader = true
+	}
+	w.ResponseWriter.WriteHeader(code)
 }
 
 // requireToken returns middleware that validates the Authorization header.

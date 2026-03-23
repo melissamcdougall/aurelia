@@ -976,6 +976,74 @@ func TestTLSPeerIdentityFromCert(t *testing.T) {
 	}
 }
 
+func TestAuditLogMiddleware(t *testing.T) {
+	certs := generateTestCerts(t, "limen")
+
+	d := daemon.NewDaemon(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("daemon start: %v", err)
+	}
+	t.Cleanup(func() { d.Stop(5 * time.Second) })
+
+	srv := NewServer(d, nil)
+	tokenPath := filepath.Join(t.TempDir(), "api.token")
+	srv.GenerateToken(tokenPath)
+
+	// Capture log output
+	var logBuf bytes.Buffer
+	srv.logger = slog.New(slog.NewJSONHandler(&logBuf, nil))
+
+	serverTLS, _ := LoadTLSConfig(certs.ServerCertPath, certs.ServerKeyPath, certs.CAPath)
+	ln, _ := tls.Listen("tcp", "127.0.0.1:0", serverTLS)
+	addr := ln.Addr().String()
+
+	srv.tcpServer = &http.Server{
+		Handler: srv.requireAuth(srv.auditLog(srv.server.Handler)),
+	}
+	go srv.tcpServer.Serve(ln)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	caPEM, _ := os.ReadFile(certs.CAPath)
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(caPEM)
+
+	// Make a request with mTLS
+	clientCert, _ := tls.LoadX509KeyPair(certs.ClientCertPath, certs.ClientKeyPath)
+	mtlsClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				Certificates: []tls.Certificate{clientCert},
+				RootCAs:      caPool,
+			},
+		},
+	}
+	resp, err := mtlsClient.Get("https://" + addr + "/v1/health")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+
+	// Check audit log contains expected fields
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "api.request") {
+		t.Errorf("expected audit log message, got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `"peer":"limen"`) {
+		t.Errorf("expected peer identity 'limen' in audit log, got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `"method":"GET"`) {
+		t.Errorf("expected method GET in audit log, got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `"path":"/v1/health"`) {
+		t.Errorf("expected path /v1/health in audit log, got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `"status":200`) {
+		t.Errorf("expected status 200 in audit log, got: %s", logOutput)
+	}
+}
+
 func TestLoadTLSConfigInvalidPaths(t *testing.T) {
 	t.Parallel()
 
