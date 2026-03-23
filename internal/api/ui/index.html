@@ -13,12 +13,10 @@
       --dim: #444;
       --muted: #777;
       --accent: #e04020;
-      --accent-dim: #802010;
       --panel-bg: rgba(255, 255, 255, 0.03);
       --panel-border: rgba(255, 255, 255, 0.08);
       --ghost: rgba(255, 255, 255, 0.02);
       --focus-bg: rgba(224, 64, 32, 0.1);
-
       --healthy: #2ecc71;
       --unhealthy: #e04020;
       --unknown: #777;
@@ -31,12 +29,10 @@
       --dim: #a08a78;
       --muted: #5c4d42;
       --accent: #c04020;
-      --accent-dim: #d4704a;
       --panel-bg: rgba(192, 72, 32, 0.04);
       --panel-border: rgba(160, 138, 120, 0.3);
       --ghost: rgba(192, 72, 32, 0.04);
       --focus-bg: rgba(192, 64, 32, 0.12);
-
       --healthy: #27ae60;
       --unhealthy: #c04020;
       --unknown: #a08a78;
@@ -45,21 +41,11 @@
 
     @media (prefers-color-scheme: light) {
       :root:not([data-theme="dark"]) {
-        --bg: #f0ebe4;
-        --fg: #1a1410;
-        --dim: #a08a78;
-        --muted: #5c4d42;
-        --accent: #c04020;
-        --accent-dim: #d4704a;
-        --panel-bg: rgba(192, 72, 32, 0.04);
-        --panel-border: rgba(160, 138, 120, 0.3);
-        --ghost: rgba(192, 72, 32, 0.04);
+        --bg: #f0ebe4; --fg: #1a1410; --dim: #a08a78; --muted: #5c4d42;
+        --accent: #c04020; --panel-bg: rgba(192, 72, 32, 0.04);
+        --panel-border: rgba(160, 138, 120, 0.3); --ghost: rgba(192, 72, 32, 0.04);
         --focus-bg: rgba(192, 64, 32, 0.12);
-
-        --healthy: #27ae60;
-        --unhealthy: #c04020;
-        --unknown: #a08a78;
-        --stopped: #a08a78;
+        --healthy: #27ae60; --unhealthy: #c04020; --unknown: #a08a78; --stopped: #a08a78;
       }
     }
 
@@ -73,8 +59,6 @@
       display: flex;
       flex-direction: column;
     }
-
-    /* --- Header --- */
 
     .header {
       padding: 1.5rem 2rem;
@@ -100,8 +84,7 @@
 
     .header-status .dot {
       display: inline-block;
-      width: 6px;
-      height: 6px;
+      width: 6px; height: 6px;
       border-radius: 50%;
       margin-right: 0.4rem;
       vertical-align: middle;
@@ -110,283 +93,95 @@
     .header-status .dot.ok { background: var(--healthy); }
     .header-status .dot.err { background: var(--unhealthy); }
 
-    /* --- Graph container --- */
-
     .graph-container {
       flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      overflow: auto;
       padding: 2rem;
-      position: relative;
     }
 
-    #graph svg {
-      display: block;
-      max-width: 100%;
-      height: auto;
-    }
+    #graph svg { display: block; }
 
     /* --- Detail panel --- */
 
     .detail-overlay {
-      position: fixed;
-      inset: 0;
+      position: fixed; inset: 0;
       background: rgba(0, 0, 0, 0.85);
       z-index: 100;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      opacity: 0;
-      pointer-events: none;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none;
       transition: opacity 0.3s ease;
     }
 
-    [data-theme="light"] .detail-overlay,
-    :root:not([data-theme="dark"]) .detail-overlay {
-      background: rgba(240, 235, 228, 0.92);
-    }
-
     @media (prefers-color-scheme: light) {
-      :root:not([data-theme="dark"]) .detail-overlay {
-        background: rgba(240, 235, 228, 0.92);
-      }
+      :root:not([data-theme="dark"]) .detail-overlay { background: rgba(240, 235, 228, 0.92); }
     }
+    [data-theme="light"] .detail-overlay { background: rgba(240, 235, 228, 0.92); }
 
-    .detail-overlay.active {
-      opacity: 1;
-      pointer-events: all;
-    }
+    .detail-overlay.active { opacity: 1; pointer-events: all; }
 
     .detail-panel {
-      width: 90vw;
-      max-width: 40rem;
-      max-height: 85vh;
-      overflow-y: auto;
-      background: var(--bg);
+      width: 90vw; max-width: 40rem; max-height: 85vh;
+      overflow-y: auto; background: var(--bg);
       border: 1px solid var(--panel-border);
       transform: scale(0.92);
       transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
-    .detail-overlay.active .detail-panel {
-      transform: scale(1);
-    }
+    .detail-overlay.active .detail-panel { transform: scale(1); }
 
     .detail-close {
-      position: absolute;
-      top: 1rem;
-      right: 1rem;
+      position: absolute; top: 1rem; right: 1rem;
       font-family: 'Space Mono', monospace;
-      font-size: 0.65rem;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: var(--muted);
-      background: var(--bg);
-      border: 1px solid var(--dim);
-      padding: 0.4rem 0.8rem;
-      cursor: pointer;
-      transition: all 0.2s;
-      z-index: 101;
+      font-size: 0.65rem; letter-spacing: 0.15em; text-transform: uppercase;
+      color: var(--muted); background: var(--bg);
+      border: 1px solid var(--dim); padding: 0.4rem 0.8rem;
+      cursor: pointer; transition: all 0.2s; z-index: 101;
     }
+    .detail-close:hover { color: var(--fg); border-color: var(--fg); }
 
-    .detail-close:hover {
-      color: var(--fg);
-      border-color: var(--fg);
-    }
-
-    .detail-header {
-      padding: 1.5rem 1.5rem 1rem;
-      border-bottom: 1px solid var(--panel-border);
-    }
-
-    .detail-name {
-      font-family: 'Archivo Black', sans-serif;
-      font-size: 1.8rem;
-      text-transform: uppercase;
-      letter-spacing: -0.02em;
-      line-height: 1;
-    }
-
-    .detail-meta {
-      display: flex;
-      gap: 1.5rem;
-      margin-top: 0.75rem;
-    }
-
-    .detail-meta-item {
-      font-size: 0.55rem;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-
-    .detail-meta-label {
-      color: var(--dim);
-      margin-right: 0.3rem;
-    }
-
-    .detail-section {
-      padding: 1rem 1.5rem;
-      border-bottom: 1px solid var(--panel-border);
-    }
-
-    .detail-section:last-child {
-      border-bottom: none;
-    }
-
-    .detail-section-title {
-      font-size: 0.5rem;
-      letter-spacing: 0.25em;
-      text-transform: uppercase;
-      color: var(--dim);
-      margin-bottom: 0.75rem;
-    }
-
-    .detail-deps-list {
-      display: flex;
-      gap: 0.5rem;
-      flex-wrap: wrap;
-    }
-
-    .detail-dep-tag {
-      font-size: 0.6rem;
-      letter-spacing: 0.08em;
-      padding: 0.35rem 0.6rem;
-      border: 1px solid var(--dim);
-      color: var(--muted);
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .detail-dep-tag:hover {
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-
-    .detail-dep-tag.hard {
-      border-color: var(--fg);
-      color: var(--fg);
-    }
-
-    .detail-logs {
-      font-size: 0.6rem;
-      line-height: 1.6;
-      color: var(--muted);
-      white-space: pre-wrap;
-      word-break: break-all;
-      max-height: 12rem;
-      overflow-y: auto;
-      background: var(--ghost);
-      padding: 0.75rem;
-      border: 1px solid var(--panel-border);
-    }
-
-    .detail-health-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
-    }
-
-    .detail-health-entry {
-      font-size: 0.55rem;
-      display: flex;
-      gap: 0.75rem;
-      padding: 0.25rem 0;
-      border-bottom: 1px solid var(--panel-border);
-    }
-
-    .detail-health-entry:last-child {
-      border-bottom: none;
-    }
-
-    .detail-health-time {
-      color: var(--dim);
-      min-width: 5rem;
-    }
-
-    .detail-health-status {
-      min-width: 4rem;
-    }
-
-    .detail-health-latency {
-      color: var(--dim);
-    }
-
-    /* --- Legend --- */
+    .detail-header { padding: 1.5rem 1.5rem 1rem; border-bottom: 1px solid var(--panel-border); }
+    .detail-name { font-family: 'Archivo Black', sans-serif; font-size: 1.8rem; text-transform: uppercase; letter-spacing: -0.02em; line-height: 1; }
+    .detail-meta { display: flex; gap: 1.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
+    .detail-meta-item { font-size: 0.55rem; letter-spacing: 0.1em; text-transform: uppercase; }
+    .detail-meta-label { color: var(--dim); margin-right: 0.3rem; }
+    .detail-section { padding: 1rem 1.5rem; border-bottom: 1px solid var(--panel-border); }
+    .detail-section:last-child { border-bottom: none; }
+    .detail-section-title { font-size: 0.5rem; letter-spacing: 0.25em; text-transform: uppercase; color: var(--dim); margin-bottom: 0.75rem; }
+    .detail-deps-list { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .detail-dep-tag { font-size: 0.6rem; letter-spacing: 0.08em; padding: 0.35rem 0.6rem; border: 1px solid var(--dim); color: var(--muted); cursor: pointer; transition: all 0.2s; }
+    .detail-dep-tag:hover { border-color: var(--accent); color: var(--accent); }
+    .detail-dep-tag.hard { border-color: var(--fg); color: var(--fg); }
+    .detail-logs { font-size: 0.6rem; line-height: 1.6; color: var(--muted); white-space: pre-wrap; word-break: break-all; max-height: 12rem; overflow-y: auto; background: var(--ghost); padding: 0.75rem; border: 1px solid var(--panel-border); }
+    .detail-health-list { display: flex; flex-direction: column; gap: 0.25rem; }
+    .detail-health-entry { font-size: 0.55rem; display: flex; gap: 0.75rem; padding: 0.25rem 0; border-bottom: 1px solid var(--panel-border); }
+    .detail-health-entry:last-child { border-bottom: none; }
+    .detail-health-time { color: var(--dim); min-width: 5rem; }
+    .detail-health-status { min-width: 4rem; }
+    .detail-health-latency { color: var(--dim); }
 
     .legend {
       padding: 0.75rem 2rem;
       border-top: 1px solid var(--panel-border);
-      display: flex;
-      gap: 1.5rem;
-      justify-content: center;
-      align-items: center;
+      display: flex; gap: 1.5rem; justify-content: center; align-items: center;
     }
-
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      font-size: 0.5rem;
-      letter-spacing: 0.1em;
-      color: var(--muted);
-      text-transform: uppercase;
-    }
-
-    .legend-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-    }
-
-    .legend-line {
-      width: 20px;
-      height: 0;
-      border-top: 1px solid;
-    }
-
-    .legend-line.dashed {
-      border-top-style: dashed;
-    }
-
-    /* --- Theme toggle --- */
+    .legend-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.5rem; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; }
+    .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .legend-line { width: 20px; height: 0; border-top: 1px solid; }
+    .legend-line.dashed { border-top-style: dashed; }
 
     .theme-toggle {
-      position: fixed;
-      bottom: 0.75rem;
-      left: 0.75rem;
+      position: fixed; bottom: 0.75rem; left: 0.75rem;
       font-family: 'Space Mono', monospace;
-      font-size: 0.55rem;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: var(--muted);
-      background: var(--bg);
-      border: 1px solid var(--dim);
-      padding: 0.4rem 0.8rem;
-      cursor: pointer;
-      transition: all 0.2s;
-      z-index: 10;
+      font-size: 0.55rem; letter-spacing: 0.15em; text-transform: uppercase;
+      color: var(--muted); background: var(--bg);
+      border: 1px solid var(--dim); padding: 0.4rem 0.8rem;
+      cursor: pointer; transition: all 0.2s; z-index: 10;
     }
+    .theme-toggle:hover { color: var(--fg); border-color: var(--fg); }
 
-    .theme-toggle:hover {
-      color: var(--fg);
-      border-color: var(--fg);
-    }
-
-    /* --- Transitions --- */
-
-    .node-group {
-      cursor: pointer;
-      transition: opacity 0.2s;
-    }
-
-    .node-group:hover rect {
-      stroke: var(--accent) !important;
-    }
-
-    .node-group:hover .node-name {
-      fill: var(--accent) !important;
-    }
+    .node-group { cursor: pointer; }
+    .node-group:hover rect.node-bg { stroke: var(--accent) !important; }
+    .node-group:hover .node-name { fill: var(--accent) !important; }
   </style>
 </head>
 <body>
@@ -404,33 +199,14 @@
   </div>
 
   <div class="legend">
-    <div class="legend-item">
-      <div class="legend-dot" style="background: var(--healthy)"></div>
-      healthy
-    </div>
-    <div class="legend-item">
-      <div class="legend-dot" style="background: var(--unhealthy)"></div>
-      unhealthy
-    </div>
-    <div class="legend-item">
-      <div class="legend-dot" style="background: var(--unknown)"></div>
-      unknown
-    </div>
-    <div class="legend-item">
-      <div class="legend-dot" style="background: var(--stopped)"></div>
-      stopped
-    </div>
-    <div class="legend-item">
-      <div class="legend-line" style="border-color: var(--fg)"></div>
-      requires
-    </div>
-    <div class="legend-item">
-      <div class="legend-line dashed" style="border-color: var(--dim)"></div>
-      after
-    </div>
+    <div class="legend-item"><div class="legend-dot" style="background: var(--healthy)"></div> healthy</div>
+    <div class="legend-item"><div class="legend-dot" style="background: var(--unhealthy)"></div> unhealthy</div>
+    <div class="legend-item"><div class="legend-dot" style="background: var(--unknown)"></div> unknown</div>
+    <div class="legend-item"><div class="legend-dot" style="background: var(--stopped)"></div> stopped</div>
+    <div class="legend-item"><div class="legend-line" style="border-color: var(--fg)"></div> requires</div>
+    <div class="legend-item"><div class="legend-line dashed" style="border-color: var(--dim)"></div> after</div>
   </div>
 
-  <!-- Detail overlay -->
   <div class="detail-overlay" id="detailOverlay">
     <div class="detail-panel" id="detailPanel">
       <button class="detail-close" id="detailClose">close</button>
@@ -440,7 +216,6 @@
 
   <button class="theme-toggle" id="themeToggle">light</button>
 
-  <script src="dagre.min.js"></script>
   <script>
     // Theme
     const toggle = document.getElementById('themeToggle');
@@ -475,7 +250,6 @@
     const detailContent = document.getElementById('detailContent');
     const detailClose = document.getElementById('detailClose');
 
-    // Colors
     function healthColor(state, health) {
       if (state === 'stopped' || state === 'failed') return 'var(--stopped)';
       if (health === 'healthy') return 'var(--healthy)';
@@ -492,161 +266,161 @@
     }
 
     function typeIcon(type) {
-      if (type === 'container') return '\u25A1'; // hollow square
-      if (type === 'external') return '\u25C7';  // hollow diamond
-      return '\u25CB'; // hollow circle for native
+      if (type === 'container') return '\u25A1';
+      if (type === 'external') return '\u25C7';
+      return '\u25CB';
     }
 
-    // Layout & render
+    // --- Layout: hand-placed grid per host ---
+
     function renderGraph(nodes) {
-      const g = new dagre.graphlib.Graph({ compound: true });
-      g.setGraph({
-        rankdir: 'TB',
-        nodesep: 40,
-        ranksep: 60,
-        marginx: 40,
-        marginy: 40,
-      });
-      g.setDefaultEdgeLabel(() => ({}));
-
-      const nodeW = 140;
-      const nodeH = 56;
-
-      // Create cluster groups per node
-      const nodeNames = new Set(nodes.map(n => n.node || 'local'));
-      nodeNames.forEach(name => {
-        g.setNode('cluster_' + name, { label: name, clusterLabelPos: 'top' });
-      });
-
+      // Group by host
+      const hosts = {};
       nodes.forEach(n => {
-        const key = (n.node || 'local') + '/' + n.name;
-        g.setNode(key, { width: nodeW, height: nodeH, service: n });
-        g.setParent(key, 'cluster_' + (n.node || 'local'));
+        const host = n.node || 'local';
+        if (!hosts[host]) hosts[host] = [];
+        hosts[host].push(n);
       });
 
-      // Build edges: requires (solid) and after (dashed)
-      // Build lookup: for each node name on each host, find the compound key
-      const keysByName = {};
-      nodes.forEach(n => {
-        const key = (n.node || 'local') + '/' + n.name;
-        if (!keysByName[n.name]) keysByName[n.name] = [];
-        keysByName[n.name].push({ key, node: n.node || 'local' });
-      });
-
-      nodes.forEach(n => {
-        const srcKey = (n.node || 'local') + '/' + n.name;
-        const srcNode = n.node || 'local';
-        (n.requires || []).forEach(dep => {
-          // Prefer same-node dep, fallback to any
-          const targets = keysByName[dep] || [];
-          const target = targets.find(t => t.node === srcNode) || targets[0];
-          if (target) {
-            g.setEdge(target.key, srcKey, { type: 'requires' });
-          }
+      // Sort services within each host: infrastructure first (things others depend on),
+      // then alphabetical
+      const hostNames = Object.keys(hosts).sort();
+      hostNames.forEach(host => {
+        const svcs = hosts[host];
+        // Count how many services on this host depend on each service
+        const depCount = {};
+        svcs.forEach(s => { depCount[s.name] = 0; });
+        svcs.forEach(s => {
+          [...(s.requires || []), ...(s.after || [])].forEach(dep => {
+            if (depCount[dep] !== undefined) depCount[dep]++;
+          });
         });
-        (n.after || []).forEach(dep => {
-          if ((n.requires || []).includes(dep)) return;
-          const targets = keysByName[dep] || [];
-          const target = targets.find(t => t.node === srcNode) || targets[0];
-          if (target) {
-            g.setEdge(target.key, srcKey, { type: 'after' });
-          }
-        });
+        // Sort: most depended-on first, then alphabetical
+        svcs.sort((a, b) => (depCount[b.name] || 0) - (depCount[a.name] || 0) || a.name.localeCompare(b.name));
+        hosts[host] = svcs;
       });
 
-      dagre.layout(g);
+      // Layout constants
+      const nodeW = 150;
+      const nodeH = 28;
+      const gapX = 8;
+      const gapY = 6;
+      const cols = 4;
+      const hostPadX = 24;
+      const hostPadTop = 28;
+      const hostPadBottom = 16;
+      const hostGap = 40;
 
-      const graph = g.graph();
-      const w = graph.width || 400;
-      const h = graph.height || 300;
+      // Compute positions: each host gets a block, stacked vertically
+      const positions = {}; // key -> {x, y, cx, cy}
+      let currentY = 20;
 
-      let svg = `<svg width="100%" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">`;
+      const hostBlocks = {}; // host -> {x, y, w, h}
+
+      hostNames.forEach(host => {
+        const svcs = hosts[host];
+        const rows = Math.ceil(svcs.length / cols);
+        const blockW = hostPadX * 2 + cols * nodeW + (cols - 1) * gapX;
+        const blockH = hostPadTop + rows * nodeH + (rows - 1) * gapY + hostPadBottom;
+
+        hostBlocks[host] = { x: 20, y: currentY, w: blockW, h: blockH };
+
+        svcs.forEach((svc, i) => {
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          const x = 20 + hostPadX + col * (nodeW + gapX);
+          const y = currentY + hostPadTop + row * (nodeH + gapY);
+          const key = host + '/' + svc.name;
+          positions[key] = { x, y, cx: x + nodeW / 2, cy: y + nodeH / 2, svc };
+        });
+
+        currentY += blockH + hostGap;
+      });
+
+      const totalW = 20 + hostPadX * 2 + cols * nodeW + (cols - 1) * gapX + 40;
+      const totalH = currentY;
+
+      let svg = `<svg width="${totalW}" height="${totalH}" viewBox="0 0 ${totalW} ${totalH}" xmlns="http://www.w3.org/2000/svg">`;
 
       // Arrow markers
       svg += `<defs>
-        <marker id="arrowSolid" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-          <path d="M0,0 L8,3 L0,6" fill="none" stroke="var(--fg)" stroke-width="1"/>
+        <marker id="arrowSolid" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+          <path d="M0,0 L6,2 L0,4" fill="none" stroke="var(--fg)" stroke-width="1"/>
         </marker>
-        <marker id="arrowDash" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-          <path d="M0,0 L8,3 L0,6" fill="none" stroke="var(--dim)" stroke-width="1"/>
+        <marker id="arrowDash" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+          <path d="M0,0 L6,2 L0,4" fill="none" stroke="var(--dim)" stroke-width="1"/>
         </marker>
       </defs>`;
 
-      // Edges
-      g.edges().forEach(e => {
-        const edge = g.edge(e);
-        const points = edge.points;
-        if (!points || points.length < 2) return;
+      // Dependency edges (drawn first, behind nodes)
+      nodes.forEach(n => {
+        const host = n.node || 'local';
+        const srcKey = host + '/' + n.name;
+        const src = positions[srcKey];
+        if (!src) return;
 
-        const isRequires = edge.type === 'requires';
-        const stroke = isRequires ? 'var(--fg)' : 'var(--dim)';
-        const dash = isRequires ? '' : 'stroke-dasharray="4,3"';
-        const marker = isRequires ? 'url(#arrowSolid)' : 'url(#arrowDash)';
+        const drawEdge = (dep, type) => {
+          // Find dep on same host first, then any host
+          let tgtKey = host + '/' + dep;
+          if (!positions[tgtKey]) {
+            // Search other hosts
+            for (const h of hostNames) {
+              const k = h + '/' + dep;
+              if (positions[k]) { tgtKey = k; break; }
+            }
+          }
+          const tgt = positions[tgtKey];
+          if (!tgt) return;
 
-        let d = `M${points[0].x},${points[0].y}`;
-        for (let i = 1; i < points.length; i++) {
-          d += ` L${points[i].x},${points[i].y}`;
-        }
+          const isRequires = type === 'requires';
+          const stroke = isRequires ? 'var(--fg)' : 'var(--dim)';
+          const dash = isRequires ? '' : ' stroke-dasharray="3,2"';
+          const marker = isRequires ? 'url(#arrowSolid)' : 'url(#arrowDash)';
 
-        svg += `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="1" ${dash} marker-end="${marker}"/>`;
-      });
+          // Draw from target (dependency) right edge to source left edge
+          const x1 = tgt.x + nodeW;
+          const y1 = tgt.cy;
+          const x2 = src.x;
+          const y2 = src.cy;
 
-      // Cluster backgrounds
-      nodeNames.forEach(name => {
-        const clusterNode = g.node('cluster_' + name);
-        if (!clusterNode) return;
-        // Dagre doesn't lay out compound nodes with dimensions,
-        // so we compute bounds from children
-        const children = g.children('cluster_' + name) || [];
-        if (children.length === 0) return;
+          // If same row, curve right. Otherwise, use a simple path.
+          const midX = Math.max(x1, x2) + 20;
+          svg += `<path d="M${x1},${y1} C${midX},${y1} ${midX},${y2} ${x2},${y2}" fill="none" stroke="${stroke}" stroke-width="1"${dash} marker-end="${marker}" opacity="0.5"/>`;
+        };
 
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        children.forEach(id => {
-          const n = g.node(id);
-          if (!n) return;
-          minX = Math.min(minX, n.x - nodeW / 2);
-          minY = Math.min(minY, n.y - nodeH / 2);
-          maxX = Math.max(maxX, n.x + nodeW / 2);
-          maxY = Math.max(maxY, n.y + nodeH / 2);
+        (n.requires || []).forEach(dep => drawEdge(dep, 'requires'));
+        (n.after || []).forEach(dep => {
+          if (!(n.requires || []).includes(dep)) drawEdge(dep, 'after');
         });
-
-        const pad = 16;
-        const labelH = 18;
-        svg += `<rect x="${minX - pad}" y="${minY - pad - labelH}" width="${maxX - minX + pad * 2}" height="${maxY - minY + pad * 2 + labelH}" fill="none" stroke="var(--dim)" stroke-width="1" stroke-dasharray="3,3" rx="2"/>`;
-        svg += `<text x="${minX - pad + 8}" y="${minY - pad - 4}" fill="var(--dim)" font-size="8" font-family="'Space Mono', monospace" letter-spacing="0.2em" text-transform="uppercase">${name.toUpperCase()}</text>`;
       });
 
-      // Nodes
-      g.nodes().forEach(id => {
-        const node = g.node(id);
-        if (!node.service) return; // skip cluster nodes
-        const svc = node.service;
-        const x = node.x - nodeW / 2;
-        const y = node.y - nodeH / 2;
+      // Host blocks
+      hostNames.forEach(host => {
+        const b = hostBlocks[host];
+        svg += `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" fill="none" stroke="var(--dim)" stroke-width="1" stroke-dasharray="3,3" rx="2"/>`;
+        svg += `<text x="${b.x + 10}" y="${b.y + 16}" fill="var(--dim)" font-size="8" font-family="'Space Mono', monospace" letter-spacing="0.2em">${host.toUpperCase()}</text>`;
+      });
+
+      // Service nodes
+      Object.entries(positions).forEach(([key, pos]) => {
+        const svc = pos.svc;
+        const x = pos.x;
+        const y = pos.y;
         const color = healthColor(svc.state, svc.health);
         const label = stateLabel(svc.state, svc.health);
-        const icon = typeIcon(svc.type);
-        const nodeLabel = svc.node || 'local';
+        const host = svc.node || 'local';
 
-        svg += `<g class="node-group" data-name="${svc.name}" data-node="${nodeLabel}" onclick="showDetail('${nodeLabel}/${svc.name}')">`;
-        svg += `<rect x="${x}" y="${y}" width="${nodeW}" height="${nodeH}" fill="var(--bg)" stroke="var(--panel-border)" stroke-width="1"/>`;
+        svg += `<g class="node-group" onclick="showDetail('${host}/${svc.name}')">`;
+        svg += `<rect class="node-bg" x="${x}" y="${y}" width="${nodeW}" height="${nodeH}" fill="var(--bg)" stroke="var(--panel-border)" stroke-width="1"/>`;
 
         // Health dot
-        svg += `<circle cx="${x + 12}" cy="${y + 14}" r="4" fill="${color}"/>`;
+        svg += `<circle cx="${x + 10}" cy="${y + nodeH / 2}" r="3" fill="${color}"/>`;
 
         // Name
-        svg += `<text class="node-name" x="${x + 22}" y="${y + 17}" fill="var(--fg)" font-size="10" font-family="'Space Mono', monospace" letter-spacing="0.06em">${svc.name}</text>`;
+        svg += `<text class="node-name" x="${x + 18}" y="${y + 12}" fill="var(--fg)" font-size="9" font-family="'Space Mono', monospace" letter-spacing="0.04em">${svc.name}</text>`;
 
-        // Type + state
-        svg += `<text x="${x + 22}" y="${y + 33}" fill="var(--muted)" font-size="8" font-family="'Space Mono', monospace" letter-spacing="0.04em">${icon} ${svc.type} \u00B7 ${label}</text>`;
-
-        // Node name
-        svg += `<text x="${x + 22}" y="${y + 46}" fill="var(--dim)" font-size="7" font-family="'Space Mono', monospace" letter-spacing="0.08em">${nodeLabel}</text>`;
-
-        // Port
-        if (svc.port) {
-          svg += `<text x="${x + nodeW - 8}" y="${y + 17}" fill="var(--dim)" font-size="8" font-family="'Space Mono', monospace" text-anchor="end">:${svc.port}</text>`;
-        }
+        // Type + state on second line
+        svg += `<text x="${x + 18}" y="${y + 22}" fill="var(--muted)" font-size="7" font-family="'Space Mono', monospace" letter-spacing="0.02em">${typeIcon(svc.type)} ${label}${svc.port ? ' :' + svc.port : ''}</text>`;
 
         svg += `</g>`;
       });
@@ -656,7 +430,6 @@
     }
 
     // Detail panel
-    // key is "node/name" compound key
     function showDetail(key) {
       selectedNode = key;
       const [nodeId, svcName] = key.split('/');
@@ -670,19 +443,10 @@
         <div class="detail-header">
           <div class="detail-name">${svc.name}</div>
           <div class="detail-meta">
-            <div class="detail-meta-item">
-              <span class="detail-meta-label">node</span> ${svc.node || 'local'}
-            </div>
-            <div class="detail-meta-item">
-              <span class="detail-meta-label">type</span> ${svc.type}
-            </div>
-            <div class="detail-meta-item">
-              <span class="detail-meta-label">state</span> ${svc.state}
-            </div>
-            <div class="detail-meta-item">
-              <span class="detail-meta-label">health</span>
-              <span style="color: ${color}">${label}</span>
-            </div>
+            <div class="detail-meta-item"><span class="detail-meta-label">node</span> ${svc.node || 'local'}</div>
+            <div class="detail-meta-item"><span class="detail-meta-label">type</span> ${svc.type}</div>
+            <div class="detail-meta-item"><span class="detail-meta-label">state</span> ${svc.state}</div>
+            <div class="detail-meta-item"><span class="detail-meta-label">health</span> <span style="color: ${color}">${label}</span></div>
             ${svc.port ? `<div class="detail-meta-item"><span class="detail-meta-label">port</span> ${svc.port}</div>` : ''}
             ${svc.uptime ? `<div class="detail-meta-item"><span class="detail-meta-label">uptime</span> ${svc.uptime}</div>` : ''}
             ${svc.restart_count ? `<div class="detail-meta-item"><span class="detail-meta-label">restarts</span> ${svc.restart_count}</div>` : ''}
@@ -690,7 +454,6 @@
         </div>
       `;
 
-      // Dependencies
       const allDeps = [...new Set([...(svc.requires || []), ...(svc.after || [])])];
       const requires = new Set(svc.requires || []);
       if (allDeps.length > 0) {
@@ -702,7 +465,6 @@
         </div>`;
       }
 
-      // Dependents (reverse lookup, same node)
       const dependents = graphData.filter(n =>
         (n.node || 'local') === nodeId &&
         ((n.requires || []).includes(svcName) || (n.after || []).includes(svcName))
@@ -719,7 +481,6 @@
       detailContent.innerHTML = html;
       detailOverlay.classList.add('active');
 
-      // Fetch health and logs (only works for local services)
       Promise.all([
         fetch(`/v1/services/${svcName}/health`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`/v1/services/${svcName}/logs?n=30`).then(r => r.ok ? r.json() : null).catch(() => null),
@@ -749,9 +510,7 @@
           </div>`;
         }
 
-        if (extra) {
-          detailContent.innerHTML += extra;
-        }
+        if (extra) detailContent.innerHTML += extra;
       });
     }
 
@@ -761,15 +520,10 @@
     }
 
     detailClose.addEventListener('click', closeDetail);
-    detailOverlay.addEventListener('click', e => {
-      if (e.target === detailOverlay) closeDetail();
-    });
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') closeDetail();
-    });
+    detailOverlay.addEventListener('click', e => { if (e.target === detailOverlay) closeDetail(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
 
     // Polling
-    let pollInterval = null;
     let consecutiveErrors = 0;
 
     async function fetchGraph() {
@@ -801,9 +555,8 @@
       }
     }
 
-    // Initial fetch + poll every 3s
     fetchGraph();
-    pollInterval = setInterval(fetchGraph, 3000);
+    setInterval(fetchGraph, 3000);
   </script>
 </body>
 </html>
