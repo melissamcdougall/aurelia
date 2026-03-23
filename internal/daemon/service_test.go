@@ -725,3 +725,101 @@ func TestManagedServiceStopExternal(t *testing.T) {
 		t.Errorf("expected nil error stopping external service, got %v", err)
 	}
 }
+
+func TestManagedServiceOneshotMonitoring(t *testing.T) {
+	// Oneshot: command exits 0, service stays running via health monitoring
+	s := &spec.ServiceSpec{
+		Service: spec.Service{
+			Name:    "test-oneshot",
+			Type:    "native",
+			Command: "true", // exits immediately with code 0
+		},
+		Restart: &spec.RestartPolicy{
+			Policy: "oneshot",
+			Delay:  spec.Duration{Duration: 10 * time.Millisecond},
+		},
+		Health: &spec.HealthCheck{
+			Type:     "exec",
+			Command:  "true", // always healthy
+			Interval: spec.Duration{Duration: 100 * time.Millisecond},
+			Timeout:  spec.Duration{Duration: 5 * time.Second},
+		},
+	}
+
+	ms, err := NewManagedService(s, nil)
+	if err != nil {
+		t.Fatalf("failed to create: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := ms.Start(ctx); err != nil {
+		t.Fatalf("failed to start: %v", err)
+	}
+
+	// Wait for command to exit and service to enter monitoring
+	waitUntil(t, func() bool {
+		st := ms.State()
+		return st.State == driver.StateRunning && st.PID == 0
+	}, 3*time.Second, "oneshot to enter monitoring (running with no PID)")
+
+	state := ms.State()
+	if state.RestartCount != 0 {
+		t.Errorf("expected 0 restarts in monitoring phase, got %d", state.RestartCount)
+	}
+
+	// Stop should work cleanly
+	cancel()
+	waitUntil(t, func() bool {
+		s := ms.State().State
+		return s == driver.StateStopped || s == driver.StateFailed
+	}, 2*time.Second, "service to stop after cancel")
+}
+
+func TestManagedServiceOneshotFailedCommand(t *testing.T) {
+	// Oneshot: command exits non-zero, normal restart logic applies
+	s := &spec.ServiceSpec{
+		Service: spec.Service{
+			Name:    "test-oneshot-fail",
+			Type:    "native",
+			Command: "false", // exits with code 1
+		},
+		Restart: &spec.RestartPolicy{
+			Policy:      "oneshot",
+			MaxAttempts: 2,
+			Delay:       spec.Duration{Duration: 10 * time.Millisecond},
+		},
+		Health: &spec.HealthCheck{
+			Type:     "exec",
+			Command:  "true",
+			Interval: spec.Duration{Duration: 100 * time.Millisecond},
+			Timeout:  spec.Duration{Duration: 5 * time.Second},
+		},
+	}
+
+	ms, err := NewManagedService(s, nil)
+	if err != nil {
+		t.Fatalf("failed to create: %v", err)
+	}
+
+	if err := ms.Start(context.Background()); err != nil {
+		t.Fatalf("failed to start: %v", err)
+	}
+
+	// Wait for at least one restart to fire
+	waitUntil(t, func() bool {
+		return ms.State().RestartCount >= 1
+	}, 3*time.Second, "at least 1 restart for failed oneshot command")
+
+	// Then wait for retries to exhaust
+	waitUntil(t, func() bool {
+		s := ms.State().State
+		return s == driver.StateStopped || s == driver.StateFailed
+	}, 3*time.Second, "oneshot with failed command to stop")
+
+	state := ms.State()
+	if state.RestartCount < 1 {
+		t.Error("expected at least 1 restart attempt for failed oneshot command")
+	}
+}

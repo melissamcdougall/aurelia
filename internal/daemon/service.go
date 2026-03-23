@@ -77,6 +77,8 @@ type ManagedService struct {
 	allocatedPort int
 	// specHash is the SHA-256 hash of the spec at startup, used for change detection on reload
 	specHash string
+	// monitoring is true when a oneshot service is in health-monitoring phase (no process)
+	monitoring bool
 }
 
 // NewManagedService creates a managed service from a spec.
@@ -294,7 +296,10 @@ func (ms *ManagedService) State() ServiceState {
 		return st
 	}
 
-	if ms.drv != nil {
+	if ms.monitoring {
+		st.State = driver.StateRunning
+		st.PID = 0
+	} else if ms.drv != nil {
 		info := ms.drv.Info()
 		st.State = info.State
 		st.PID = info.PID
@@ -355,10 +360,11 @@ func (ms *ManagedService) Inspect() ServiceInspect {
 type supervisionPhase int
 
 const (
-	phaseStarting   supervisionPhase = iota // Create driver and start the process
+	phaseStarting    supervisionPhase = iota // Create driver and start the process
 	phaseRunning                            // Wait for process exit or health failure
 	phaseEvaluating                         // Decide whether to restart based on exit code and policy
 	phaseRestarting                         // Wait for restart delay, then loop back to starting
+	phaseMonitoring                         // Oneshot: command exited 0, monitor health only
 	phaseStopped                            // Terminal — supervision is done
 )
 
@@ -383,6 +389,8 @@ func (ms *ManagedService) supervise(ctx context.Context) {
 			phase = ms.handleEvaluating(ctx, drv)
 		case phaseRestarting:
 			phase = ms.handleRestarting(ctx)
+		case phaseMonitoring:
+			phase = ms.handleMonitoring(ctx)
 		}
 	}
 }
@@ -409,6 +417,8 @@ func (ms *ManagedService) superviseExisting(ctx context.Context, drv driver.Driv
 		case phaseStarting:
 			// After first restart, fall into the normal create-and-start path
 			drv, phase = ms.handleStarting(ctx)
+		case phaseMonitoring:
+			phase = ms.handleMonitoring(ctx)
 		}
 	}
 }
@@ -508,6 +518,12 @@ func (ms *ManagedService) handleEvaluating(ctx context.Context, drv driver.Drive
 		}
 	case "always":
 		// Continue to restart
+	case "oneshot":
+		if exitCode == 0 {
+			ms.logger.Info("oneshot command completed, entering health monitoring")
+			return phaseMonitoring
+		}
+		// Non-zero exit: fall through to normal restart logic
 	}
 
 	ms.mu.Lock()
@@ -526,6 +542,39 @@ func (ms *ManagedService) handleRestarting(ctx context.Context) supervisionPhase
 	case <-time.After(delay):
 		return phaseStarting
 	case <-ctx.Done():
+		return phaseStopped
+	}
+}
+
+// handleMonitoring is the oneshot health-monitoring phase.
+// The command has exited successfully; we keep the health monitor running
+// and wait for either a health failure (→ restart the command) or context cancellation.
+func (ms *ManagedService) handleMonitoring(ctx context.Context) supervisionPhase {
+	ms.mu.Lock()
+	ms.monitoring = true
+	ms.drv = nil // no active process
+	ms.mu.Unlock()
+
+	// Start a fresh health monitor for the monitoring phase
+	monitor := ms.startHealthMonitor(ctx)
+	ms.mu.Lock()
+	ms.monitor = monitor
+	ms.mu.Unlock()
+
+	select {
+	case <-ms.unhealthyCh:
+		ms.logger.Warn("oneshot health check failed, restarting command")
+		ms.stopMonitor()
+		ms.mu.Lock()
+		ms.monitoring = false
+		ms.restartCount++
+		ms.mu.Unlock()
+		return phaseRestarting
+	case <-ctx.Done():
+		ms.stopMonitor()
+		ms.mu.Lock()
+		ms.monitoring = false
+		ms.mu.Unlock()
 		return phaseStopped
 	}
 }
