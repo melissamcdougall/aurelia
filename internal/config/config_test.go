@@ -216,6 +216,81 @@ func TestNodeLoadToken(t *testing.T) {
 	}
 }
 
+func TestLoadTLSConfig(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `api_addr: 0.0.0.0:9090
+tls:
+  cert: /etc/aurelia/tls/server.crt
+  key: /etc/aurelia/tls/server.key
+  ca: /etc/aurelia/tls/ca.crt
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.TLS == nil {
+		t.Fatal("expected TLS config to be present")
+	}
+	if cfg.TLS.Cert != "/etc/aurelia/tls/server.crt" {
+		t.Errorf("TLS.Cert = %q, want /etc/aurelia/tls/server.crt", cfg.TLS.Cert)
+	}
+	if cfg.TLS.Key != "/etc/aurelia/tls/server.key" {
+		t.Errorf("TLS.Key = %q, want /etc/aurelia/tls/server.key", cfg.TLS.Key)
+	}
+	if cfg.TLS.CA != "/etc/aurelia/tls/ca.crt" {
+		t.Errorf("TLS.CA = %q, want /etc/aurelia/tls/ca.crt", cfg.TLS.CA)
+	}
+	if !cfg.TLS.Configured() {
+		t.Error("expected TLS.Configured() to return true")
+	}
+}
+
+func TestTLSConfiguredPartial(t *testing.T) {
+	t.Parallel()
+
+	// Missing CA
+	tls := &TLS{Cert: "/a.crt", Key: "/a.key"}
+	if tls.Configured() {
+		t.Error("expected Configured() = false when CA is missing")
+	}
+
+	// Nil
+	var nilTLS *TLS
+	if nilTLS.Configured() {
+		t.Error("expected Configured() = false for nil TLS")
+	}
+}
+
+func TestLoadNoTLSConfig(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	content := `api_addr: 127.0.0.1:9090
+`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.TLS != nil {
+		t.Errorf("expected TLS to be nil when not configured, got %+v", cfg.TLS)
+	}
+	if cfg.TLS.Configured() {
+		t.Error("expected Configured() = false for absent TLS block")
+	}
+}
+
 func TestLoadCommentsOnly(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

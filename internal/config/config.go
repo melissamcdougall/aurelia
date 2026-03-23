@@ -34,6 +34,18 @@ func (n Node) LoadToken() (string, error) {
 	return "", fmt.Errorf("no token configured for node %s", n.Name)
 }
 
+// TLS holds TLS certificate paths for the daemon's TCP listener and peer connections.
+type TLS struct {
+	Cert string `yaml:"cert"` // path to server certificate (PEM)
+	Key  string `yaml:"key"`  // path to server private key (PEM)
+	CA   string `yaml:"ca"`   // path to CA certificate for verifying client certs (PEM)
+}
+
+// Configured returns true if all required TLS paths are set.
+func (t *TLS) Configured() bool {
+	return t != nil && t.Cert != "" && t.Key != "" && t.CA != ""
+}
+
 // Config holds persistent daemon configuration loaded from ~/.aurelia/config.yaml.
 type Config struct {
 	RoutingOutput string `yaml:"routing_output"`
@@ -41,6 +53,7 @@ type Config struct {
 	NodeName      string `yaml:"node_name,omitempty"`
 	Nodes         []Node `yaml:"nodes,omitempty"`
 	LaminaRoot    string `yaml:"lamina_root,omitempty"`
+	TLS           *TLS   `yaml:"tls,omitempty"`
 }
 
 // FindNode returns the node with the given name, or false if not found.

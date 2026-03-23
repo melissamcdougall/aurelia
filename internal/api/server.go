@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -149,6 +151,108 @@ func (s *Server) ListenTCP(addr string) error {
 		MaxHeaderBytes:    s.server.MaxHeaderBytes,
 	}
 	return s.tcpServer.Serve(ln)
+}
+
+// LoadTLSConfig creates a tls.Config for the TCP listener from cert, key, and CA paths.
+// The config requests (but does not require) client certs, allowing both mTLS peers
+// and bearer-token CLI clients.
+func LoadTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("loading server cert/key: %w", err)
+	}
+
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("reading CA cert: %w", err)
+	}
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("CA cert file contains no valid certificates")
+	}
+
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientCAs:    caPool,
+		ClientAuth:   tls.VerifyClientCertIfGiven,
+		MinVersion:   tls.VersionTLS13,
+	}, nil
+}
+
+// ListenTLS starts the server on a TLS-encrypted TCP address.
+// Clients presenting a valid client certificate (mTLS) are authenticated by cert CN.
+// Clients without a client certificate must provide a bearer token.
+func (s *Server) ListenTLS(addr string, tlsConfig *tls.Config) error {
+	if s.token == "" {
+		return fmt.Errorf("TLS API requires authentication; call GenerateToken first")
+	}
+
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		switch host {
+		case "127.0.0.1", "::1", "localhost":
+		default:
+			s.logger.Warn("TCP API binding to non-loopback address",
+				"addr", addr)
+		}
+	}
+
+	ln, err := tls.Listen("tcp", addr, tlsConfig)
+	if err != nil {
+		return err
+	}
+	s.logger.Info("API listening (TLS)", "addr", addr)
+
+	s.tcpServer = &http.Server{
+		Handler:           s.requireAuth(s.server.Handler),
+		ReadTimeout:       s.server.ReadTimeout,
+		WriteTimeout:      s.server.WriteTimeout,
+		ReadHeaderTimeout: s.server.ReadHeaderTimeout,
+		IdleTimeout:       s.server.IdleTimeout,
+		MaxHeaderBytes:    s.server.MaxHeaderBytes,
+	}
+	return s.tcpServer.Serve(ln)
+}
+
+// requireAuth returns middleware that authenticates via client cert (mTLS) or bearer token.
+// If a verified client cert is present, the peer identity (cert CN) is set on the request
+// context. Otherwise, the bearer token is validated.
+func (s *Server) requireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check for verified client certificate (mTLS)
+		if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
+			cn := r.TLS.PeerCertificates[0].Subject.CommonName
+			ctx := context.WithValue(r.Context(), peerIdentityKey, cn)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
+		// Fall back to bearer token
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		provided := strings.TrimPrefix(auth, "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) != 1 {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		ctx := context.WithValue(r.Context(), peerIdentityKey, "cli")
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+type contextKey string
+
+const peerIdentityKey contextKey = "peer_identity"
+
+// PeerIdentity returns the authenticated peer identity from the request context.
+// Returns "cli" for bearer-token clients, or the cert CN for mTLS peers.
+func PeerIdentity(ctx context.Context) string {
+	if v, ok := ctx.Value(peerIdentityKey).(string); ok {
+		return v
+	}
+	return ""
 }
 
 // requireToken returns middleware that validates the Authorization header.

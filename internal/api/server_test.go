@@ -3,9 +3,17 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -686,4 +694,302 @@ func fakePeerServer(t *testing.T, states []daemon.ServiceState) *httptest.Server
 			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		}
 	}))
+}
+
+// testCA generates a self-signed CA, server cert, and optional client cert for testing.
+// Returns paths to the CA cert, server cert, server key, client cert, and client key.
+type testCerts struct {
+	CAPath         string
+	ServerCertPath string
+	ServerKeyPath  string
+	ClientCertPath string
+	ClientKeyPath  string
+}
+
+func generateTestCerts(t *testing.T, clientCN string) testCerts {
+	t.Helper()
+	dir := t.TempDir()
+
+	// CA key and cert
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(1 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	caCertDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, err := x509.ParseCertificate(caCertDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	writePEM := func(path string, typ string, data []byte) {
+		t.Helper()
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		pem.Encode(f, &pem.Block{Type: typ, Bytes: data})
+	}
+	writeKey := func(path string, key *ecdsa.PrivateKey) {
+		t.Helper()
+		data, err := x509.MarshalECPrivateKey(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writePEM(path, "EC PRIVATE KEY", data)
+	}
+
+	caPath := filepath.Join(dir, "ca.crt")
+	writePEM(caPath, "CERTIFICATE", caCertDER)
+
+	// Server cert
+	serverKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	serverTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "localhost"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(1 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
+	}
+	serverCertDER, err := x509.CreateCertificate(rand.Reader, serverTemplate, caCert, &serverKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverCertPath := filepath.Join(dir, "server.crt")
+	serverKeyPath := filepath.Join(dir, "server.key")
+	writePEM(serverCertPath, "CERTIFICATE", serverCertDER)
+	writeKey(serverKeyPath, serverKey)
+
+	tc := testCerts{
+		CAPath:         caPath,
+		ServerCertPath: serverCertPath,
+		ServerKeyPath:  serverKeyPath,
+	}
+
+	// Client cert (for mTLS)
+	if clientCN != "" {
+		clientKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		clientTemplate := &x509.Certificate{
+			SerialNumber: big.NewInt(3),
+			Subject:      pkix.Name{CommonName: clientCN},
+			NotBefore:    time.Now(),
+			NotAfter:     time.Now().Add(1 * time.Hour),
+			KeyUsage:     x509.KeyUsageDigitalSignature,
+			ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		}
+		clientCertDER, err := x509.CreateCertificate(rand.Reader, clientTemplate, caCert, &clientKey.PublicKey, caKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tc.ClientCertPath = filepath.Join(dir, "client.crt")
+		tc.ClientKeyPath = filepath.Join(dir, "client.key")
+		writePEM(tc.ClientCertPath, "CERTIFICATE", clientCertDER)
+		writeKey(tc.ClientKeyPath, clientKey)
+	}
+
+	return tc
+}
+
+func TestTLSAuthMTLSClient(t *testing.T) {
+	certs := generateTestCerts(t, "limen")
+
+	d := daemon.NewDaemon(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("daemon start: %v", err)
+	}
+	t.Cleanup(func() { d.Stop(5 * time.Second) })
+
+	srv := NewServer(d, nil)
+	tokenPath := filepath.Join(t.TempDir(), "api.token")
+	if err := srv.GenerateToken(tokenPath); err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+
+	serverTLS, err := LoadTLSConfig(certs.ServerCertPath, certs.ServerKeyPath, certs.CAPath)
+	if err != nil {
+		t.Fatalf("LoadTLSConfig: %v", err)
+	}
+
+	// Bind to a port, then serve
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", serverTLS)
+	if err != nil {
+		t.Fatalf("tls.Listen: %v", err)
+	}
+	addr := ln.Addr().String()
+
+	srv.tcpServer = &http.Server{
+		Handler: srv.requireAuth(srv.server.Handler),
+	}
+	go srv.tcpServer.Serve(ln)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	// Load CA for client
+	caPEM, _ := os.ReadFile(certs.CAPath)
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(caPEM)
+
+	// Test 1: mTLS client with valid cert should succeed
+	clientCert, err := tls.LoadX509KeyPair(certs.ClientCertPath, certs.ClientKeyPath)
+	if err != nil {
+		t.Fatalf("loading client cert: %v", err)
+	}
+	mtlsClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				Certificates: []tls.Certificate{clientCert},
+				RootCAs:      caPool,
+			},
+		},
+	}
+	resp, err := mtlsClient.Get("https://" + addr + "/v1/health")
+	if err != nil {
+		t.Fatalf("mTLS GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("mTLS: expected 200, got %d", resp.StatusCode)
+	}
+
+	// Test 2: No client cert, no token should fail
+	noAuthClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: caPool,
+			},
+		},
+	}
+	resp, err = noAuthClient.Get("https://" + addr + "/v1/health")
+	if err != nil {
+		t.Fatalf("no-auth GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Errorf("no-auth: expected 401, got %d", resp.StatusCode)
+	}
+
+	// Test 3: No client cert but valid bearer token should succeed
+	tokenBytes, _ := os.ReadFile(tokenPath)
+	req, _ := http.NewRequest("GET", "https://"+addr+"/v1/health", nil)
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(tokenBytes)))
+	resp, err = noAuthClient.Do(req)
+	if err != nil {
+		t.Fatalf("bearer GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("bearer: expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestTLSPeerIdentityFromCert(t *testing.T) {
+	certs := generateTestCerts(t, "hestia")
+
+	d := daemon.NewDaemon(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("daemon start: %v", err)
+	}
+	t.Cleanup(func() { d.Stop(5 * time.Second) })
+
+	// Custom handler that returns the peer identity
+	srv := NewServer(d, nil)
+	tokenPath := filepath.Join(t.TempDir(), "api.token")
+	srv.GenerateToken(tokenPath)
+
+	identityHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := PeerIdentity(r.Context())
+		writeJSON(w, http.StatusOK, map[string]string{"peer": id})
+	})
+
+	serverTLS, _ := LoadTLSConfig(certs.ServerCertPath, certs.ServerKeyPath, certs.CAPath)
+	ln, _ := tls.Listen("tcp", "127.0.0.1:0", serverTLS)
+	addr := ln.Addr().String()
+
+	srv.tcpServer = &http.Server{
+		Handler: srv.requireAuth(identityHandler),
+	}
+	go srv.tcpServer.Serve(ln)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	caPEM, _ := os.ReadFile(certs.CAPath)
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(caPEM)
+
+	// mTLS client should get CN as identity
+	clientCert, _ := tls.LoadX509KeyPair(certs.ClientCertPath, certs.ClientKeyPath)
+	mtlsClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				Certificates: []tls.Certificate{clientCert},
+				RootCAs:      caPool,
+			},
+		},
+	}
+	resp, err := mtlsClient.Get("https://" + addr + "/v1/health")
+	if err != nil {
+		t.Fatalf("mTLS GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result map[string]string
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result["peer"] != "hestia" {
+		t.Errorf("peer identity = %q, want %q", result["peer"], "hestia")
+	}
+
+	// Bearer token client should get "cli" as identity
+	tokenBytes, _ := os.ReadFile(tokenPath)
+	req, _ := http.NewRequest("GET", "https://"+addr+"/v1/health", nil)
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(tokenBytes)))
+	noAuthClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: caPool},
+		},
+	}
+	resp2, err := noAuthClient.Do(req)
+	if err != nil {
+		t.Fatalf("bearer GET: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	var result2 map[string]string
+	json.NewDecoder(resp2.Body).Decode(&result2)
+	if result2["peer"] != "cli" {
+		t.Errorf("peer identity = %q, want %q", result2["peer"], "cli")
+	}
+}
+
+func TestLoadTLSConfigInvalidPaths(t *testing.T) {
+	t.Parallel()
+
+	_, err := LoadTLSConfig("/nonexistent/cert", "/nonexistent/key", "/nonexistent/ca")
+	if err == nil {
+		t.Error("expected error for nonexistent cert paths")
+	}
+}
+
+func TestListenTLSRequiresToken(t *testing.T) {
+	srv := NewServer(daemon.NewDaemon(t.TempDir()), nil)
+	tlsCfg := &tls.Config{}
+	err := srv.ListenTLS("127.0.0.1:0", tlsCfg)
+	if err == nil {
+		t.Fatal("expected error when calling ListenTLS without GenerateToken")
+	}
 }
