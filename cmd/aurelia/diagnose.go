@@ -14,13 +14,14 @@ import (
 	"github.com/benaskins/axon-talk/ollama"
 	"github.com/benaskins/aurelia/internal/config"
 	"github.com/benaskins/aurelia/internal/diagnose"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
 var diagnoseCmd = &cobra.Command{
 	Use:   "diagnose [service]",
 	Short: "LLM-powered diagnosis of managed services",
-	Long:  "Uses an LLM to analyze service state, logs, and health — gathering evidence via aurelia's API before diagnosing.",
+	Long:  "Interactive diagnostic conversation — aurelia reasons about its managed services using LLM tool calls.",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load(config.DefaultPath())
@@ -46,18 +47,28 @@ var diagnoseCmd = &cobra.Command{
 			return err
 		}
 
-		engine := diagnose.NewEngine(llm, cfg.Diagnose.Model, apiClient)
-
 		var service string
 		if len(args) > 0 {
 			service = args[0]
 		}
 
-		_, err = engine.Diagnose(context.Background(), service, func(token string) {
-			fmt.Print(token)
+		// Create the TUI program first, then wire confirmation through it
+		var p *tea.Program
+
+		confirm := diagnose.TUIConfirm(func(msg tea.Msg) {
+			if p != nil {
+				p.Send(msg)
+			}
 		})
-		fmt.Println()
-		return err
+
+		engine := diagnose.NewEngineWithActions(llm, cfg.Diagnose.Model, apiClient, confirm)
+		model := diagnose.NewTUIModel(engine, service)
+
+		p = tea.NewProgram(model, tea.WithAltScreen())
+		if _, err := p.Run(); err != nil {
+			return fmt.Errorf("TUI error: %w", err)
+		}
+		return nil
 	},
 }
 
