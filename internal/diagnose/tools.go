@@ -12,6 +12,7 @@ import (
 type APIClient interface {
 	Get(path string) (*http.Response, error)
 	Post(path string) (*http.Response, error)
+	Delete(path string) (*http.Response, error)
 }
 
 // ConfirmFunc is called before executing an action tool.
@@ -40,6 +41,7 @@ func ActionTools(client APIClient, confirm ConfirmFunc) map[string]tool.ToolDef 
 		"restart_service": actionTool(client, confirm, "restart"),
 		"start_service":   actionTool(client, confirm, "start"),
 		"stop_service":    actionTool(client, confirm, "stop"),
+		"remove_service":  removeTool(client, confirm),
 	}
 }
 
@@ -246,6 +248,41 @@ func getSystemResourcesTool(client APIClient) tool.ToolDef {
 		},
 		Execute: func(ctx *tool.ToolContext, args map[string]any) tool.ToolResult {
 			return tool.ToolResult{Content: apiGet(client, "/v1/system")}
+		},
+	}
+}
+
+func apiDelete(client APIClient, path string) string {
+	resp, err := client.Delete(path)
+	if err != nil {
+		return fmt.Sprintf(`{"error": %q}`, err.Error())
+	}
+	defer resp.Body.Close()
+	return readBody(resp)
+}
+
+func removeTool(client APIClient, confirm ConfirmFunc) tool.ToolDef {
+	return tool.ToolDef{
+		Name:        "remove_service",
+		Description: "Propose removing a service. Stops the service, archives its spec file, and unloads it from the daemon. The operator must approve before the action is executed.",
+		Parameters: tool.ParameterSchema{
+			Type:     "object",
+			Required: []string{"name", "reason"},
+			Properties: map[string]tool.PropertySchema{
+				"name":   {Type: "string", Description: "Name of the service"},
+				"reason": {Type: "string", Description: "Why this service should be removed"},
+			},
+		},
+		Execute: func(ctx *tool.ToolContext, args map[string]any) tool.ToolResult {
+			name, _ := args["name"].(string)
+			reason, _ := args["reason"].(string)
+
+			if confirm != nil && !confirm("remove", name, reason) {
+				return tool.ToolResult{Content: fmt.Sprintf("Action rejected by operator: remove %s", name)}
+			}
+
+			result := apiDelete(client, fmt.Sprintf("/v1/services/%s", name))
+			return tool.ToolResult{Content: fmt.Sprintf("Action executed: remove %s. API response: %s", name, result)}
 		},
 	}
 }

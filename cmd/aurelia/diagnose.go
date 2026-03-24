@@ -137,6 +137,14 @@ func (c *socketAPIClient) Post(path string) (*http.Response, error) {
 	return c.client.Post("http://aurelia"+path, "application/json", nil)
 }
 
+func (c *socketAPIClient) Delete(path string) (*http.Response, error) {
+	req, err := http.NewRequest("DELETE", "http://aurelia"+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.client.Do(req)
+}
+
 func init() {
 	rootCmd.AddCommand(diagnoseCmd)
 }

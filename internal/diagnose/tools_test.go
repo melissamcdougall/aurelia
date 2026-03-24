@@ -22,6 +22,14 @@ func (c *testAPIClient) Post(path string) (*http.Response, error) {
 	return http.Post(c.server.URL+path, "application/json", nil)
 }
 
+func (c *testAPIClient) Delete(path string) (*http.Response, error) {
+	req, err := http.NewRequest("DELETE", c.server.URL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return http.DefaultClient.Do(req)
+}
+
 func setupTestAPI(t *testing.T, handler http.Handler) APIClient {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -50,7 +58,7 @@ func TestActionToolsReturnsAllActions(t *testing.T) {
 	client := setupTestAPI(t, http.NotFoundHandler())
 	tools := ActionTools(client, nil)
 
-	expected := []string{"restart_service", "start_service", "stop_service"}
+	expected := []string{"restart_service", "start_service", "stop_service", "remove_service"}
 	for _, name := range expected {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("missing action tool %q", name)
@@ -63,8 +71,8 @@ func TestAllToolsCombinesReadAndAction(t *testing.T) {
 	client := setupTestAPI(t, http.NotFoundHandler())
 	tools := AllTools(client, nil)
 
-	if len(tools) != 13 {
-		t.Errorf("got %d tools, want 13", len(tools))
+	if len(tools) != 14 {
+		t.Errorf("got %d tools, want 14", len(tools))
 	}
 }
 
@@ -358,6 +366,48 @@ func TestGetServiceDependenciesTool(t *testing.T) {
 	result := tools["get_service_dependencies"].Execute(nil, map[string]any{"name": "app"})
 	if !contains(result.Content, "db") {
 		t.Errorf("expected 'db' in deps result, got %q", result.Content)
+	}
+}
+
+func TestRemoveToolExecutes(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("DELETE /v1/services/stale", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "removed"})
+	})
+
+	client := setupTestAPI(t, mux)
+	confirm := func(action, service, reason string) bool { return true }
+	tools := ActionTools(client, confirm)
+
+	result := tools["remove_service"].Execute(&tool.ToolContext{}, map[string]any{
+		"name":   "stale",
+		"reason": "service no longer needed",
+	})
+
+	if !contains(result.Content, "remove stale") {
+		t.Errorf("expected 'remove stale' in result, got %q", result.Content)
+	}
+	if !contains(result.Content, "removed") {
+		t.Errorf("expected 'removed' in result, got %q", result.Content)
+	}
+}
+
+func TestRemoveToolRejected(t *testing.T) {
+	t.Parallel()
+	client := setupTestAPI(t, http.NotFoundHandler())
+	confirm := func(action, service, reason string) bool { return false }
+	tools := ActionTools(client, confirm)
+
+	result := tools["remove_service"].Execute(&tool.ToolContext{}, map[string]any{
+		"name":   "important",
+		"reason": "test rejection",
+	})
+
+	if !contains(result.Content, "rejected") {
+		t.Errorf("expected 'rejected' in result, got %q", result.Content)
 	}
 }
 
