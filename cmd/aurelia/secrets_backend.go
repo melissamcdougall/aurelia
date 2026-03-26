@@ -32,24 +32,26 @@ func newSecretStore(actor string) (*keychain.AuditedStore, error) {
 		return nil, err
 	}
 
-	inner := resolveBackend(dir)
+	inner, err := resolveBackend(dir)
+	if err != nil {
+		return nil, fmt.Errorf("resolving secrets backend: %w", err)
+	}
 	return keychain.NewAuditedStore(inner, auditLog, meta, actor), nil
 }
 
 // resolveBackend picks the best available secrets backend.
-func resolveBackend(stateDir string) keychain.Store {
+// When OpenBao is configured, it is required — no silent fallback to Keychain.
+func resolveBackend(stateDir string) (keychain.Store, error) {
 	cfgPath := config.DefaultPath()
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		slog.Warn("failed to load config, using keychain", "error", err)
-		return keychain.NewSystemStore()
+		return nil, fmt.Errorf("loading config %s: %w", cfgPath, err)
 	}
 
 	if cfg.OpenBao != nil {
 		token, err := cfg.OpenBao.LoadToken()
 		if err != nil {
-			slog.Warn("openbao token not available, using keychain", "error", err)
-			return keychain.NewSystemStore()
+			return nil, fmt.Errorf("openbao configured but token not available: %w", err)
 		}
 
 		var opts []keychain.BaoOption
@@ -64,13 +66,12 @@ func resolveBackend(stateDir string) keychain.Store {
 
 		store := keychain.NewBaoStore(cfg.OpenBao.Addr, token, mount, opts...)
 		if err := store.Ping(); err != nil {
-			slog.Warn("openbao unreachable, using keychain", "addr", cfg.OpenBao.Addr, "error", err)
-			return keychain.NewSystemStore()
+			return nil, fmt.Errorf("openbao configured but unreachable at %s: %w", cfg.OpenBao.Addr, err)
 		}
 
 		slog.Info("secrets backend: openbao", "addr", cfg.OpenBao.Addr)
-		return store
+		return store, nil
 	}
 
-	return keychain.NewSystemStore()
+	return keychain.NewSystemStore(), nil
 }

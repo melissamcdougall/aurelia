@@ -76,7 +76,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
-	// Create and start daemon with secret store (OpenBao preferred, Keychain fallback)
+	// Create and start daemon with secret store
 	stateDir := filepath.Dir(specDir)
 	secrets, err := newSecretStore("daemon")
 	if err != nil {
