@@ -1,3 +1,8 @@
+---
+module: github.com/benaskins/aurelia
+kind: supervisor
+---
+
 # AGENTS.md
 
 Project context for AI coding agents working in this repository.
