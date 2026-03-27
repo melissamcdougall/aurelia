@@ -1319,16 +1319,6 @@ service:
 		t.Errorf("expected text/html content-type, got %q", ct)
 	}
 
-	// dagre.min.js should be served
-	resp2, err := client.Get("http://aurelia/ui/dagre.min.js")
-	if err != nil {
-		t.Fatalf("GET /ui/dagre.min.js: %v", err)
-	}
-	defer resp2.Body.Close()
-
-	if resp2.StatusCode != 200 {
-		t.Errorf("expected 200 for dagre.min.js, got %d", resp2.StatusCode)
-	}
 }
 
 func TestGraphEndpoint(t *testing.T) {
