@@ -1,15 +1,12 @@
 import Foundation
 
 actor AureliaClient {
-    private let socketPath: String
+    private let http: UnixSocketHTTP
 
     init(socketPath: String? = nil) {
-        if let socketPath {
-            self.socketPath = socketPath
-        } else {
-            self.socketPath = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".aurelia/aurelia.sock").path
-        }
+        let path = socketPath ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".aurelia/aurelia.sock").path
+        self.http = UnixSocketHTTP(socketPath: path)
     }
 
     func services() async throws -> [ServiceInfo] {
@@ -25,7 +22,6 @@ actor AureliaClient {
 
     func action(service: String, action: String) async throws {
         let data = try await post("/v1/services/\(service)/\(action)")
-        // Check for error response
         if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
             throw ClientError.apiError(errorResponse.error)
         }
@@ -37,56 +33,37 @@ actor AureliaClient {
         return json["status"] == "ok"
     }
 
-    // MARK: - HTTP via curl
+    // MARK: - HTTP
 
     private func get(_ path: String) async throws -> Data {
-        try await curl(method: "GET", path: path)
+        let (status, data) = try await http.request(method: "GET", path: path)
+        guard (200..<300).contains(status) else {
+            if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                throw ClientError.apiError(errorResponse.error)
+            }
+            throw ClientError.httpError(status)
+        }
+        return data
     }
 
     private func post(_ path: String) async throws -> Data {
-        try await curl(method: "POST", path: path)
-    }
-
-    private func curl(method: String, path: String) async throws -> Data {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-        process.arguments = [
-            "--unix-socket", socketPath,
-            "-s",
-            "-X", method,
-            "http://localhost\(path)",
-        ]
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        try process.run()
-        process.waitUntilExit()
-
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
-
-        if process.terminationStatus != 0 {
-            throw ClientError.curlFailed(Int(process.terminationStatus))
+        let (status, data) = try await http.request(method: "POST", path: path)
+        guard (200..<300).contains(status) else {
+            if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                throw ClientError.apiError(errorResponse.error)
+            }
+            throw ClientError.httpError(status)
         }
-
-        if data.isEmpty {
-            throw ClientError.emptyResponse
-        }
-
         return data
     }
 
     enum ClientError: Error, LocalizedError {
-        case curlFailed(Int)
-        case emptyResponse
+        case httpError(Int)
         case apiError(String)
 
         var errorDescription: String? {
             switch self {
-            case .curlFailed(let code): "curl exited with code \(code)"
-            case .emptyResponse: "Empty response from daemon"
+            case .httpError(let code): "HTTP \(code) from daemon"
             case .apiError(let message): message
             }
         }
