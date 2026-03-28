@@ -6,11 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/benaskins/aurelia/internal/api"
 	"github.com/benaskins/aurelia/internal/audit"
 	"github.com/benaskins/aurelia/internal/config"
 	"github.com/benaskins/aurelia/internal/keychain"
-	"github.com/benaskins/aurelia/internal/node"
 )
 
 // newSecretStore creates the secret store using the configured backend.
@@ -75,36 +73,5 @@ func resolveBackend(stateDir string) (keychain.Store, error) {
 		return store, nil
 	}
 
-	if cfg.OpenBaoPeer != nil {
-		peer, err := buildPeerClient(cfg, cfg.OpenBaoPeer.Peer)
-		if err != nil {
-			return nil, fmt.Errorf("openbao_peer: %w", err)
-		}
-
-		store := keychain.NewPeerBaoStore(peer)
-		slog.Info("secrets backend: peer", "peer", cfg.OpenBaoPeer.Peer)
-		return store, nil
-	}
-
 	return keychain.NewSystemStore(), nil
-}
-
-// buildPeerClient creates a node.Client for the named peer from config.
-func buildPeerClient(cfg *config.Config, peerName string) (*node.Client, error) {
-	n, ok := cfg.FindNode(peerName)
-	if !ok {
-		return nil, fmt.Errorf("peer %q not found in config nodes", peerName)
-	}
-	token, err := n.LoadToken()
-	if err != nil {
-		return nil, fmt.Errorf("loading token for peer %s: %w", peerName, err)
-	}
-	if cfg.TLS.Configured() {
-		tlsCfg, err := api.LoadPeerTLSConfig(cfg.TLS.Cert, cfg.TLS.Key, cfg.TLS.CA)
-		if err != nil {
-			return nil, fmt.Errorf("loading TLS config for peer %s: %w", peerName, err)
-		}
-		return node.NewTLS(n.Name, n.Addr, token, tlsCfg), nil
-	}
-	return node.New(n.Name, n.Addr, token), nil
 }

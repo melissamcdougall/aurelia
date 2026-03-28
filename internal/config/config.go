@@ -54,11 +54,6 @@ type OpenBao struct {
 	UnsealFile string `yaml:"unseal_file,omitempty"`
 }
 
-// OpenBaoPeer configures secret reads proxied through a peer aurelia daemon.
-type OpenBaoPeer struct {
-	Peer string `yaml:"peer"` // node name that hosts the secret store (e.g. "adyton")
-}
-
 // LoadToken reads the OpenBao token from the configured file,
 // falling back to the BAO_TOKEN environment variable.
 func (o OpenBao) LoadToken() (string, error) {
@@ -83,16 +78,15 @@ type Diagnose struct {
 
 // Config holds persistent daemon configuration loaded from ~/.aurelia/config.yaml.
 type Config struct {
-	RoutingOutput string       `yaml:"routing_output"`
-	APIAddr       string       `yaml:"api_addr"`
-	NodeName      string       `yaml:"node_name,omitempty"`
-	Nodes         []Node       `yaml:"nodes,omitempty"`
-	LaminaRoot    string       `yaml:"lamina_root,omitempty"`
-	SpecSource    string       `yaml:"spec_source,omitempty"` // source spec directory for drift detection
-	TLS           *TLS         `yaml:"tls,omitempty"`
-	OpenBao       *OpenBao     `yaml:"openbao,omitempty"`
-	OpenBaoPeer   *OpenBaoPeer `yaml:"openbao_peer,omitempty"`
-	Diagnose      *Diagnose    `yaml:"diagnose,omitempty"`
+	RoutingOutput string    `yaml:"routing_output"`
+	APIAddr       string    `yaml:"api_addr"`
+	NodeName      string    `yaml:"node_name,omitempty"`
+	Nodes         []Node    `yaml:"nodes,omitempty"`
+	LaminaRoot    string    `yaml:"lamina_root,omitempty"`
+	SpecSource    string    `yaml:"spec_source,omitempty"` // source spec directory for drift detection
+	TLS           *TLS      `yaml:"tls,omitempty"`
+	OpenBao       *OpenBao  `yaml:"openbao,omitempty"`
+	Diagnose      *Diagnose `yaml:"diagnose,omitempty"`
 }
 
 // SpecSourceDir returns the source spec directory for drift detection.
