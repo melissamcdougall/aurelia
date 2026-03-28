@@ -51,11 +51,12 @@ final class ServiceStore {
             } else {
                 let result = try await client.services()
                 services = result.sorted(by: { $0.name < $1.name })
-                // Probe for peers on local-only polls to know whether to show the toggle
-                if !hasPeers {
-                    if let graph = try? await client.clusterGraph() {
-                        hasPeers = !graph.peers.isEmpty
-                    }
+            }
+            // Always check for peers so the toggle appears
+            if !hasPeers {
+                if let graph = try? await client.clusterGraph() {
+                    hasPeers = !graph.peers.isEmpty
+                    peers = graph.peers
                 }
             }
             isConnected = true
