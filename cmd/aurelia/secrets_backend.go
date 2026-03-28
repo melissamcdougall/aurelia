@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/benaskins/aurelia/internal/api"
 	"github.com/benaskins/aurelia/internal/audit"
 	"github.com/benaskins/aurelia/internal/config"
 	"github.com/benaskins/aurelia/internal/keychain"
+	"github.com/benaskins/aurelia/internal/node"
 )
 
 // newSecretStore creates the secret store using the configured backend.
@@ -75,6 +77,30 @@ func resolveBackend(stateDir string) (keychain.Store, error) {
 		return store, nil
 	}
 
+	if cfg.OpenBaoPeer != nil {
+		peer, err := buildPeerClient(cfg, cfg.OpenBaoPeer.Peer)
+		if err != nil {
+			return nil, fmt.Errorf("openbao_peer: %w", err)
+		}
+
+		mount := cfg.OpenBaoPeer.Mount
+		if mount == "" {
+			mount = "secret"
+		}
+
+		store := keychain.NewPeerBaoStore(cfg.OpenBaoPeer.Addr, mount, func() (string, error) {
+			resp, err := peer.RequestBaoToken()
+			if err != nil {
+				return "", err
+			}
+			return resp.Token, nil
+		})
+
+		slog.Info("secrets backend: openbao via peer",
+			"peer", cfg.OpenBaoPeer.Peer, "addr", cfg.OpenBaoPeer.Addr)
+		return store, nil
+	}
+
 	return keychain.NewSystemStore(), nil
 }
 
@@ -93,4 +119,23 @@ func waitForSecretStore(ctx context.Context, actor string) (*keychain.AuditedSto
 			slog.Debug("secrets backend not ready, retrying", "error", err)
 		}
 	}
+}
+
+func buildPeerClient(cfg *config.Config, peerName string) (*node.Client, error) {
+	n, ok := cfg.FindNode(peerName)
+	if !ok {
+		return nil, fmt.Errorf("peer %q not found in config nodes", peerName)
+	}
+	token, err := n.LoadToken()
+	if err != nil {
+		return nil, fmt.Errorf("loading token for peer %s: %w", peerName, err)
+	}
+	if cfg.TLS.Configured() {
+		tlsCfg, err := api.LoadPeerTLSConfig(cfg.TLS.Cert, cfg.TLS.Key, cfg.TLS.CA)
+		if err != nil {
+			return nil, fmt.Errorf("loading TLS for peer %s: %w", peerName, err)
+		}
+		return node.NewTLS(n.Name, n.Addr, token, tlsCfg), nil
+	}
+	return node.New(n.Name, n.Addr, token), nil
 }

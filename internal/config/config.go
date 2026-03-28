@@ -69,6 +69,15 @@ func (o OpenBao) LoadToken() (string, error) {
 	return "", fmt.Errorf("no openbao token: set token_file in config or BAO_TOKEN env var")
 }
 
+// OpenBaoPeer configures secret reads via token vending from a peer node.
+// The daemon vends a short-lived token from the peer, then reads from
+// OpenBao directly using that scoped token.
+type OpenBaoPeer struct {
+	Peer  string `yaml:"peer"`  // node name that vends tokens (e.g. "adyton")
+	Addr  string `yaml:"addr"`  // openbao API address (e.g. "http://openbao.adyton.internal")
+	Mount string `yaml:"mount"` // KV mount path (default "secret")
+}
+
 // Diagnose configures the LLM-powered diagnostic engine.
 type Diagnose struct {
 	Provider     string `yaml:"provider"`       // LLM provider: "anthropic", "ollama", "openai"
@@ -84,9 +93,10 @@ type Config struct {
 	Nodes         []Node    `yaml:"nodes,omitempty"`
 	LaminaRoot    string    `yaml:"lamina_root,omitempty"`
 	SpecSource    string    `yaml:"spec_source,omitempty"` // source spec directory for drift detection
-	TLS           *TLS      `yaml:"tls,omitempty"`
-	OpenBao       *OpenBao  `yaml:"openbao,omitempty"`
-	Diagnose      *Diagnose `yaml:"diagnose,omitempty"`
+	TLS           *TLS         `yaml:"tls,omitempty"`
+	OpenBao       *OpenBao     `yaml:"openbao,omitempty"`
+	OpenBaoPeer   *OpenBaoPeer `yaml:"openbao_peer,omitempty"`
+	Diagnose      *Diagnose    `yaml:"diagnose,omitempty"`
 }
 
 // SpecSourceDir returns the source spec directory for drift detection.
