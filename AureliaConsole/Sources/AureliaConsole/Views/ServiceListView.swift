@@ -16,42 +16,114 @@ struct ServiceListView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(store.services) { service in
-                        VStack(alignment: .leading, spacing: 0) {
-                            ServiceRowView(
-                                service: service,
-                                isExpanded: expandedService == service.name,
-                                onToggle: {
-                                    withAnimation(.easeInOut(duration: 0.15)) {
-                                        expandedService = expandedService == service.name ? nil : service.name
-                                    }
-                                },
-                                onAction: { action in
-                                    Task {
-                                        switch action {
-                                        case "start": await store.start(service: service.name)
-                                        case "stop": await store.stop(service: service.name)
-                                        case "restart": await store.restart(service: service.name)
-                                        default: break
-                                        }
-                                    }
-                                }
-                            )
-
-                            if expandedService == service.name {
-                                ServiceDetailView(service: service, store: store)
-                            }
-
-                            Rectangle()
-                                .fill(LaminaTheme.border)
-                                .frame(height: 1)
-                        }
+                    if store.clusterMode {
+                        clusterView
+                    } else {
+                        localView
                     }
                 }
             }
         }
     }
+
+    @ViewBuilder
+    private var localView: some View {
+        ForEach(store.services) { service in
+            serviceEntry(service)
+        }
+    }
+
+    @ViewBuilder
+    private var clusterView: some View {
+        ForEach(store.nodeNames, id: \.self) { node in
+            NodeHeaderView(
+                name: node,
+                status: store.peers[node] ?? "ok"
+            )
+
+            ForEach(store.services(forNode: node)) { service in
+                serviceEntry(service)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func serviceEntry(_ service: ServiceInfo) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ServiceRowView(
+                service: service,
+                isExpanded: expandedService == service.id,
+                onToggle: {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        expandedService = expandedService == service.id ? nil : service.id
+                    }
+                },
+                onAction: { action in
+                    Task {
+                        switch action {
+                        case "start": await store.start(service: service)
+                        case "stop": await store.stop(service: service)
+                        case "restart": await store.restart(service: service)
+                        default: break
+                        }
+                    }
+                }
+            )
+
+            if expandedService == service.id {
+                ServiceDetailView(service: service, store: store)
+            }
+
+            Rectangle()
+                .fill(LaminaTheme.border)
+                .frame(height: 1)
+        }
+    }
 }
+
+// MARK: - Node Header
+
+struct NodeHeaderView: View {
+    let name: String
+    let status: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(peerColor)
+                .frame(width: 6, height: 6)
+
+            Text(name.uppercased())
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(LaminaTheme.accent)
+                .tracking(2)
+
+            Rectangle()
+                .fill(LaminaTheme.border)
+                .frame(height: 1)
+
+            if status != "ok" {
+                Text(status.uppercased())
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(peerColor)
+                    .tracking(1)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    private var peerColor: Color {
+        switch status {
+        case "ok": LaminaTheme.statusOk
+        case "timeout": LaminaTheme.statusWarn
+        default: LaminaTheme.statusError
+        }
+    }
+}
+
+// MARK: - Disconnected
 
 struct DisconnectedView: View {
     var body: some View {

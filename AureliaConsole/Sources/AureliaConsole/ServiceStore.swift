@@ -4,12 +4,16 @@ import Foundation
 @Observable
 final class ServiceStore {
     var services: [ServiceInfo] = []
+    var peers: [String: String] = [:]  // node name -> "ok" | "timeout" | "error" | "unreachable"
     var isConnected = false
+    var clusterMode = false
+    var hasPeers = false
     var error: String?
 
     private let client = AureliaClient()
     private var pollTask: Task<Void, Never>?
     private var backoff = false
+    private var consecutiveFailures = 0
 
     func startPolling() {
         guard pollTask == nil else { return }
@@ -28,32 +32,59 @@ final class ServiceStore {
         pollTask = nil
     }
 
+    func toggleClusterMode() {
+        clusterMode.toggle()
+    }
+
     private func poll() async {
         do {
-            let result = try await client.services()
-            services = result
+            if clusterMode {
+                let graph = try await client.clusterGraph()
+                // Build ServiceInfo from graph nodes for display
+                let clusterServices = try await client.clusterServices()
+                services = clusterServices.sorted {
+                    if $0.node != $1.node { return ($0.node ?? "") < ($1.node ?? "") }
+                    return $0.name < $1.name
+                }
+                peers = graph.peers
+                hasPeers = !graph.peers.isEmpty
+            } else {
+                let result = try await client.services()
+                services = result.sorted(by: { $0.name < $1.name })
+                // Probe for peers on local-only polls to know whether to show the toggle
+                if !hasPeers {
+                    if let graph = try? await client.clusterGraph() {
+                        hasPeers = !graph.peers.isEmpty
+                    }
+                }
+            }
             isConnected = true
             error = nil
             backoff = false
+            consecutiveFailures = 0
         } catch {
-            isConnected = false
-            services = []
-            self.error = error.localizedDescription
-            backoff = true
+            consecutiveFailures += 1
+            if consecutiveFailures >= 3 {
+                isConnected = false
+                services = []
+                peers = [:]
+                self.error = error.localizedDescription
+                backoff = true
+            }
         }
     }
 
     // MARK: - Service actions
 
-    func start(service: String) async {
+    func start(service: ServiceInfo) async {
         await performAction(service: service, action: "start")
     }
 
-    func stop(service: String) async {
+    func stop(service: ServiceInfo) async {
         await performAction(service: service, action: "stop")
     }
 
-    func restart(service: String) async {
+    func restart(service: ServiceInfo) async {
         await performAction(service: service, action: "restart")
     }
 
@@ -65,17 +96,38 @@ final class ServiceStore {
         }
     }
 
-    private func performAction(service: String, action: String) async {
+    private func performAction(service: ServiceInfo, action: String) async {
         do {
-            try await client.action(service: service, action: action)
-            // Immediately re-poll to get updated state
+            if clusterMode, let node = service.node {
+                try await client.clusterAction(service: service.name, action: action, node: node)
+            } else {
+                try await client.action(service: service.name, action: action)
+            }
             await poll()
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    // MARK: - Aggregate status
+    // MARK: - Computed
+
+    /// Unique node names from the current service list, in order.
+    var nodeNames: [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for service in services {
+            let node = service.node ?? "local"
+            if seen.insert(node).inserted {
+                result.append(node)
+            }
+        }
+        return result
+    }
+
+    /// Services grouped by node.
+    func services(forNode node: String) -> [ServiceInfo] {
+        services.filter { ($0.node ?? "local") == node }
+    }
 
     enum AggregateStatus {
         case ok, warning, error, disconnected
@@ -88,6 +140,8 @@ final class ServiceStore {
         if services.contains(where: {
             $0.state == .starting || $0.state == .stopping || $0.health == .unhealthy
         }) { return .warning }
+        // In cluster mode, check for unhealthy peers
+        if clusterMode && peers.values.contains(where: { $0 != "ok" }) { return .warning }
         return .ok
     }
 }

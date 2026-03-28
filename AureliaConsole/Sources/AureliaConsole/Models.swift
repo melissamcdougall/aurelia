@@ -9,7 +9,10 @@ enum HealthStatus: String, Codable, Sendable {
 }
 
 struct ServiceInfo: Codable, Identifiable, Sendable {
-    var id: String { name }
+    var id: String {
+        if let node { return "\(node)/\(name)" }
+        return name
+    }
     let name: String
     let type: String
     let state: ServiceState
@@ -36,4 +39,27 @@ struct LogResponse: Codable, Sendable {
 
 struct ErrorResponse: Codable, Sendable {
     let error: String
+}
+
+struct ClusterGraphResponse: Codable, Sendable {
+    let nodes: [GraphNode]
+    let peers: [String: String]  // node name -> "ok" | "timeout" | "error" | "unreachable"
+}
+
+struct GraphNode: Codable, Sendable {
+    let name: String
+    let type: String
+    let state: ServiceState
+    let health: HealthStatus
+    let port: Int?
+    let uptime: String?
+    let restartCount: Int
+    let after: [String]?
+    let requires: [String]?
+    let node: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name, type, state, health, port, uptime, after, requires, node
+        case restartCount = "restart_count"
+    }
 }

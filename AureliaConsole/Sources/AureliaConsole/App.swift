@@ -14,6 +14,13 @@ struct AureliaConsoleApp: App {
                         .foregroundStyle(LaminaTheme.fg)
                         .tracking(2)
                     Spacer()
+
+                    if store.hasPeers {
+                        ClusterToggle(isCluster: store.clusterMode) {
+                            store.toggleClusterMode()
+                        }
+                    }
+
                     Text("CONSOLE")
                         .font(LaminaTheme.label)
                         .foregroundStyle(LaminaTheme.accent)
