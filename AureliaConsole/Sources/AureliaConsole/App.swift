@@ -6,7 +6,6 @@ struct AureliaConsoleApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        // Invisible settings window — the real UI is the NSStatusItem popover
         Settings {
             EmptyView()
         }
@@ -18,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private let store = ServiceStore()
+    private let graphStore = GraphStore()
+    private lazy var graphWindowController = GraphWindowController(graphStore: graphStore)
     private var observeTask: Task<Void, Never>?
     private var lastStatus: ServiceStore.AggregateStatus?
 
@@ -29,7 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
         }
 
-        let hostingView = NSHostingView(rootView: PopoverContentView(store: store))
+        let hostingView = NSHostingView(
+            rootView: PopoverContentView(store: store, onOpenGraph: { [weak self] in
+                self?.graphWindowController.showWindow()
+            })
+        )
         hostingView.frame = NSRect(x: 0, y: 0, width: 400, height: 460)
 
         popover = NSPopover()
@@ -78,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct PopoverContentView: View {
     let store: ServiceStore
+    var onOpenGraph: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 0) {
@@ -88,6 +94,23 @@ struct PopoverContentView: View {
                     .foregroundStyle(LaminaTheme.fg)
                     .tracking(2)
                 Spacer()
+
+                // Graph button
+                Button(action: onOpenGraph) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                            .font(.system(size: 9))
+                        Text("GRAPH")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .tracking(1)
+                    }
+                    .foregroundStyle(LaminaTheme.muted)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 3).fill(LaminaTheme.panelBg))
+                    .overlay(RoundedRectangle(cornerRadius: 3).stroke(LaminaTheme.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
 
                 if store.hasPeers {
                     ClusterToggle(isCluster: store.clusterMode) {

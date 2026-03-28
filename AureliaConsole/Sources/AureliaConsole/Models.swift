@@ -51,6 +51,59 @@ struct ClusterGraphResponse: Codable, Sendable {
     let peers: [String: String]  // node name -> "ok" | "timeout" | "error" | "unreachable"
 }
 
+// MARK: - Graph Layout
+
+enum EdgeKind: Sendable {
+    case requires  // hard dependency — solid line
+    case after     // soft ordering — dashed line
+}
+
+struct LayoutNode: Sendable {
+    let name: String
+    let type: String
+    let state: ServiceState
+    let health: HealthStatus
+    let layer: Int
+    let positionInLayer: Int
+    var center: CGPoint = .zero
+    let frame: CGRect
+
+    init(name: String, type: String, state: ServiceState, health: HealthStatus, layer: Int, positionInLayer: Int) {
+        self.name = name
+        self.type = type
+        self.state = state
+        self.health = health
+        self.layer = layer
+        self.positionInLayer = positionInLayer
+        let x = CGFloat(layer) * GraphLayout.columnSpacing + GraphLayout.margin
+        let y = CGFloat(positionInLayer) * GraphLayout.rowSpacing + GraphLayout.margin
+        self.frame = CGRect(x: x, y: y, width: GraphLayout.nodeWidth, height: GraphLayout.nodeHeight)
+        self.center = CGPoint(x: frame.midX, y: frame.midY)
+    }
+}
+
+struct LayoutEdge: Sendable {
+    let from: String
+    let to: String
+    let kind: EdgeKind
+    var fromPoint: CGPoint = .zero
+    var toPoint: CGPoint = .zero
+}
+
+struct GraphLayout: Sendable {
+    static let nodeWidth: CGFloat = 140
+    static let nodeHeight: CGFloat = 50
+    static let columnSpacing: CGFloat = 200
+    static let rowSpacing: CGFloat = 70
+    static let margin: CGFloat = 40
+
+    let nodes: [LayoutNode]
+    let edges: [LayoutEdge]
+    let canvasSize: CGSize
+}
+
+// MARK: - API Types
+
 struct GraphNode: Codable, Sendable {
     let name: String
     let type: String
