@@ -90,15 +90,7 @@ func resolveNodeClient(cmd *cobra.Command) (*node.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
-	n, ok := cfg.FindNode(nodeName)
-	if !ok {
-		return nil, fmt.Errorf("node %q not found in config", nodeName)
-	}
-	token, err := n.LoadToken()
-	if err != nil {
-		return nil, err
-	}
-	return node.New(n.Name, n.Addr, token), nil
+	return buildPeerClient(cfg, nodeName)
 }
 
 // status command
