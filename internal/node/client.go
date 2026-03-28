@@ -263,6 +263,23 @@ func (c *Client) RequestBaoToken() (*BaoTokenResponse, error) {
 	return &resp, nil
 }
 
+// GetSecret reads a secret by key from the remote daemon's secret store.
+func (c *Client) GetSecret(key string) (string, error) {
+	body, err := c.get("/v1/secret/" + key)
+	if err != nil {
+		return "", err
+	}
+	defer body.Close()
+
+	var resp struct {
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(body).Decode(&resp); err != nil {
+		return "", fmt.Errorf("decoding secret from %s: %w", c.Name, err)
+	}
+	return resp.Value, nil
+}
+
 // PushToken sends a new bearer token to the remote peer for updating its config.
 // This is used during token rotation and requires mTLS authentication.
 func (c *Client) PushToken(nodeName, newToken string) error {

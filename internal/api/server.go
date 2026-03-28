@@ -95,6 +95,9 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	// Peer token distribution (mTLS-only)
 	mux.HandleFunc("POST /v1/peer/token", s.peerTokenUpdate)
 
+	// Secret read (authenticated)
+	mux.HandleFunc("GET /v1/secret/{key...}", s.secretGet)
+
 	// OpenBao token vending (mTLS-only)
 	mux.HandleFunc("POST /v1/openbao/token", s.openbaoToken)
 
@@ -689,6 +692,29 @@ func (s *Server) SetTokenVendor(vendor *keychain.BaoTokenVendor, nodes []config.
 	for _, n := range nodes {
 		s.knownNodes[n.Name] = true
 	}
+}
+
+// secretGet reads a secret by key from the daemon's secret store.
+func (s *Server) secretGet(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	if key == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "key is required"})
+		return
+	}
+
+	secrets := s.daemon.Secrets()
+	if secrets == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no secret store configured"})
+		return
+	}
+
+	val, err := secrets.Get(key)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"value": val})
 }
 
 // openbaoToken handles scoped token vending for authenticated peers.

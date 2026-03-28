@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/benaskins/aurelia/internal/api"
 	"github.com/benaskins/aurelia/internal/config"
 	"github.com/benaskins/aurelia/internal/daemon"
 	"github.com/benaskins/aurelia/internal/driver"
@@ -81,6 +82,7 @@ func apiPost(path string) (map[string]any, error) {
 }
 
 // resolveNodeClient returns a node.Client if --node is set, or nil for local.
+// Uses mTLS when the local TLS config is present, plain HTTP otherwise.
 func resolveNodeClient(cmd *cobra.Command) (*node.Client, error) {
 	nodeName, _ := cmd.Flags().GetString("node")
 	if nodeName == "" {
@@ -97,6 +99,13 @@ func resolveNodeClient(cmd *cobra.Command) (*node.Client, error) {
 	token, err := n.LoadToken()
 	if err != nil {
 		return nil, err
+	}
+	if cfg.TLS.Configured() {
+		tlsCfg, err := api.LoadPeerTLSConfig(cfg.TLS.Cert, cfg.TLS.Key, cfg.TLS.CA)
+		if err != nil {
+			return nil, fmt.Errorf("loading TLS config: %w", err)
+		}
+		return node.NewTLS(n.Name, n.Addr, token, tlsCfg), nil
 	}
 	return node.New(n.Name, n.Addr, token), nil
 }

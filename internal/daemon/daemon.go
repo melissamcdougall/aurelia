@@ -384,6 +384,11 @@ func (d *Daemon) getService(name string) (*ManagedService, error) {
 	return ms, nil
 }
 
+// Secrets returns the daemon's secret store, or nil if not configured.
+func (d *Daemon) Secrets() keychain.Store {
+	return d.secrets
+}
+
 // IsExternal returns true if the named service is an external (unmanaged) service.
 func (d *Daemon) IsExternal(name string) bool {
 	ms, err := d.getService(name)
