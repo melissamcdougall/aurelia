@@ -17,6 +17,7 @@ import (
 	"github.com/benaskins/aurelia/internal/daemon"
 	"github.com/benaskins/aurelia/internal/gpu"
 	"github.com/benaskins/aurelia/internal/keychain"
+	"github.com/benaskins/aurelia/internal/node"
 	"github.com/spf13/cobra"
 )
 
@@ -120,13 +121,58 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	// Wire up peer nodes from config
+	var peers []*node.Client
 	if len(cfg.Nodes) > 0 {
-		peers := daemon.BuildPeers(cfg, peerTLS)
+		peers = daemon.BuildPeers(cfg, peerTLS)
 		if len(peers) > 0 {
 			opts = append(opts, daemon.WithPeers(peers))
 			slog.Info("peer nodes configured", "count", len(peers))
 		}
 	}
+
+	// Wire up automatic cert renewal if TLS is configured
+	if cfg.TLS.Configured() && cfg.NodeName != "" {
+		crCfg := daemon.CertRenewalConfig{
+			CertFile: cfg.TLS.Cert,
+			KeyFile:  cfg.TLS.Key,
+			CAFile:   cfg.TLS.CA,
+			NodeName: cfg.NodeName,
+		}
+
+		if cfg.OpenBao != nil {
+			// Adyton: self-renew directly from OpenBao PKI
+			if baoToken, err := cfg.OpenBao.LoadToken(); err == nil {
+				mount := cfg.OpenBao.Mount
+				if mount == "" {
+					mount = "secret"
+				}
+				var baoOpts []keychain.BaoOption
+				if cfg.OpenBao.UnsealFile != "" {
+					baoOpts = append(baoOpts, keychain.WithUnsealFile(cfg.OpenBao.UnsealFile))
+				}
+				baoStore := keychain.NewBaoStore(cfg.OpenBao.Addr, baoToken, mount, baoOpts...)
+				crCfg.PKIIssuer = keychain.NewBaoPKIIssuer(baoStore, "pki_lamina")
+			}
+		} else {
+			// Peer: find adyton in the peer list for remote renewal
+			for _, p := range peers {
+				if p.Name == "adyton" {
+					crCfg.Adyton = p
+					break
+				}
+			}
+		}
+
+		if crCfg.PKIIssuer != nil || crCfg.Adyton != nil {
+			cr, err := daemon.NewCertRenewal(crCfg)
+			if err != nil {
+				slog.Warn("cert renewal disabled: could not parse current cert", "error", err)
+			} else {
+				opts = append(opts, daemon.WithCertRenewal(cr))
+			}
+		}
+	}
+
 	d := daemon.NewDaemon(specDir, opts...)
 	if err := d.Start(ctx); err != nil {
 		return fmt.Errorf("starting daemon: %w", err)
@@ -191,6 +237,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			}
 			baoStore := keychain.NewBaoStore(cfg.OpenBao.Addr, baoToken, mount, baoOpts...)
 			srv.SetTokenVendor(keychain.NewBaoTokenVendor(baoStore), cfg.Nodes)
+			srv.SetPKIIssuer(keychain.NewBaoPKIIssuer(baoStore, "pki_lamina"), cfg.Nodes)
 			slog.Info("openbao token vending enabled", "nodes", len(cfg.Nodes))
 		} else {
 			slog.Warn("openbao token vending disabled: token not available", "error", err)

@@ -47,6 +47,7 @@ type Daemon struct {
 	redeployWait time.Duration   // delay before redeploying adopted services (default 10s)
 	peers        map[string]*node.Client // remote daemon peers
 	peerStatus   map[string]bool         // peer name -> reachable
+	certRenewal  *CertRenewal            // automatic cert renewal (nil = disabled)
 }
 
 // NewDaemon creates a new daemon that manages services from the given spec directory.
