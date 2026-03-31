@@ -1154,6 +1154,139 @@ func TestLoadTLSConfigInvalidPaths(t *testing.T) {
 	}
 }
 
+func TestTLSHotReload(t *testing.T) {
+	dir := t.TempDir()
+
+	// CA key and cert
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-ca"},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(1 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	caCertDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, err := x509.ParseCertificate(caCertDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	caPath := filepath.Join(dir, "ca.crt")
+	certPath := filepath.Join(dir, "server.crt")
+	keyPath := filepath.Join(dir, "server.key")
+
+	writePEMFile := func(path string, typ string, data []byte) {
+		t.Helper()
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		pem.Encode(f, &pem.Block{Type: typ, Bytes: data})
+	}
+	writeKeyFile := func(path string, key *ecdsa.PrivateKey) {
+		t.Helper()
+		data, err := x509.MarshalECPrivateKey(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writePEMFile(path, "EC PRIVATE KEY", data)
+	}
+
+	writePEMFile(caPath, "CERTIFICATE", caCertDER)
+
+	// Issue server cert with serial 10
+	issueServerCert := func(serial int64) {
+		t.Helper()
+		key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		tmpl := &x509.Certificate{
+			SerialNumber: big.NewInt(serial),
+			Subject:      pkix.Name{CommonName: "localhost"},
+			NotBefore:    time.Now(),
+			NotAfter:     time.Now().Add(1 * time.Hour),
+			KeyUsage:     x509.KeyUsageDigitalSignature,
+			ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
+		}
+		certDER, err := x509.CreateCertificate(rand.Reader, tmpl, caCert, &key.PublicKey, caKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writePEMFile(certPath, "CERTIFICATE", certDER)
+		writeKeyFile(keyPath, key)
+	}
+
+	// Start with serial 10
+	issueServerCert(10)
+
+	d := daemon.NewDaemon(t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("daemon start: %v", err)
+	}
+	t.Cleanup(func() { d.Stop(5 * time.Second) })
+
+	srv := NewServer(d, nil)
+	tokenPath := filepath.Join(t.TempDir(), "api.token")
+	srv.GenerateToken(tokenPath)
+
+	serverTLS, err := LoadTLSConfig(certPath, keyPath, caPath)
+	if err != nil {
+		t.Fatalf("LoadTLSConfig: %v", err)
+	}
+
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", serverTLS)
+	if err != nil {
+		t.Fatalf("tls.Listen: %v", err)
+	}
+	addr := ln.Addr().String()
+
+	srv.tcpServer = &http.Server{
+		Handler: srv.requireAuth(srv.server.Handler),
+	}
+	go srv.tcpServer.Serve(ln)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	caPEM, _ := os.ReadFile(caPath)
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(caPEM)
+
+	// Helper to get the server cert serial from a fresh connection
+	getServerSerial := func() *big.Int {
+		t.Helper()
+		conn, err := tls.Dial("tcp", addr, &tls.Config{RootCAs: caPool})
+		if err != nil {
+			t.Fatalf("tls.Dial: %v", err)
+		}
+		defer conn.Close()
+		return conn.ConnectionState().PeerCertificates[0].SerialNumber
+	}
+
+	serial1 := getServerSerial()
+	if serial1.Int64() != 10 {
+		t.Fatalf("initial serial = %d, want 10", serial1.Int64())
+	}
+
+	// Replace cert on disk with serial 20
+	issueServerCert(20)
+
+	// New connection should see the updated cert
+	serial2 := getServerSerial()
+	if serial2.Int64() != 20 {
+		t.Errorf("after reload: serial = %d, want 20", serial2.Int64())
+	}
+}
+
 func TestListenTLSRequiresToken(t *testing.T) {
 	srv := NewServer(daemon.NewDaemon(t.TempDir()), nil)
 	tlsCfg := &tls.Config{}

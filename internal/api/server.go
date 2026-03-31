@@ -252,9 +252,12 @@ func (s *Server) ListenTCP(addr string) error {
 // LoadTLSConfig creates a tls.Config for the TCP listener from cert, key, and CA paths.
 // The config requests (but does not require) client certs, allowing both mTLS peers
 // and bearer-token CLI clients.
+//
+// Certificates are reloaded from disk on each TLS handshake, so replacing cert
+// files on disk takes effect without restarting the daemon.
 func LoadTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
+	// Validate that files are readable at startup (fail-fast).
+	if _, err := tls.LoadX509KeyPair(certFile, keyFile); err != nil {
 		return nil, fmt.Errorf("loading server cert/key: %w", err)
 	}
 
@@ -268,18 +271,26 @@ func LoadTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
 	}
 
 	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		ClientCAs:    caPool,
-		ClientAuth:   tls.VerifyClientCertIfGiven,
-		MinVersion:   tls.VersionTLS13,
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			if err != nil {
+				return nil, err
+			}
+			return &cert, nil
+		},
+		ClientCAs:  caPool,
+		ClientAuth: tls.VerifyClientCertIfGiven,
+		MinVersion: tls.VersionTLS13,
 	}, nil
 }
 
 // LoadPeerTLSConfig creates a tls.Config for outbound peer connections (mTLS client).
 // Uses the same cert/key as the server to authenticate as a peer.
+//
+// The client certificate is reloaded from disk on each TLS handshake, so
+// replacing cert files on disk takes effect without restarting the daemon.
 func LoadPeerTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
+	if _, err := tls.LoadX509KeyPair(certFile, keyFile); err != nil {
 		return nil, fmt.Errorf("loading client cert/key: %w", err)
 	}
 
@@ -293,9 +304,15 @@ func LoadPeerTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
 	}
 
 	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      caPool,
-		MinVersion:   tls.VersionTLS13,
+		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			if err != nil {
+				return nil, err
+			}
+			return &cert, nil
+		},
+		RootCAs:    caPool,
+		MinVersion: tls.VersionTLS13,
 	}, nil
 }
 
