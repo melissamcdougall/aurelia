@@ -204,6 +204,53 @@ func TestClientRequestBaoToken(t *testing.T) {
 	}
 }
 
+func TestClientRenewCert(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/pki/renew" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != "POST" {
+			t.Errorf("method = %q, want POST", r.Method)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"certificate":   "-----BEGIN CERTIFICATE-----\ncert\n-----END CERTIFICATE-----",
+			"private_key":   "-----BEGIN EC PRIVATE KEY-----\nkey\n-----END EC PRIVATE KEY-----",
+			"ca_chain":      "-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----",
+			"serial_number": "aa:bb:cc",
+			"expiration":    1743400000,
+		})
+	}))
+	defer srv.Close()
+
+	c := New("hestia", srv.Listener.Addr().String(), "tok")
+	resp, err := c.RenewCert()
+	if err != nil {
+		t.Fatalf("RenewCert() error: %v", err)
+	}
+	if resp.Serial != "aa:bb:cc" {
+		t.Errorf("serial = %q, want %q", resp.Serial, "aa:bb:cc")
+	}
+	if resp.Expiration != 1743400000 {
+		t.Errorf("expiration = %d, want 1743400000", resp.Expiration)
+	}
+}
+
+func TestClientRenewCertError(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{"error": "requires mTLS"})
+	}))
+	defer srv.Close()
+
+	c := New("hestia", srv.Listener.Addr().String(), "tok")
+	_, err := c.RenewCert()
+	if err == nil {
+		t.Error("expected error for 403 response")
+	}
+}
+
 func TestClientRequestBaoTokenError(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -263,6 +263,32 @@ func (c *Client) RequestBaoToken() (*BaoTokenResponse, error) {
 	return &resp, nil
 }
 
+// RenewCertResponse is the response from a PKI cert renewal request.
+type RenewCertResponse struct {
+	Certificate string `json:"certificate"`
+	PrivateKey  string `json:"private_key"`
+	CAChain     string `json:"ca_chain"`
+	Serial      string `json:"serial_number"`
+	Expiration  int64  `json:"expiration"`
+}
+
+// RenewCert requests a new mTLS certificate from the remote daemon's PKI
+// renewal endpoint. Requires mTLS authentication — the peer's cert CN
+// determines the common name on the issued certificate.
+func (c *Client) RenewCert() (*RenewCertResponse, error) {
+	body, err := c.postReturnBody("/v1/pki/renew")
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+
+	var resp RenewCertResponse
+	if err := json.NewDecoder(body).Decode(&resp); err != nil {
+		return nil, fmt.Errorf("decoding renewed cert from %s: %w", c.Name, err)
+	}
+	return &resp, nil
+}
+
 // PushToken sends a new bearer token to the remote peer for updating its config.
 // This is used during token rotation and requires mTLS authentication.
 func (c *Client) PushToken(nodeName, newToken string) error {
