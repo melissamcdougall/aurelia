@@ -289,6 +289,27 @@ func (c *Client) RenewCert() (*RenewCertResponse, error) {
 	return &resp, nil
 }
 
+// IssueCert requests a certificate from the remote daemon's PKI engine.
+// Requires mTLS authentication. The role determines the PKI role used
+// (e.g. "server", "client", "node"). Returns the issued cert, key, and CA chain.
+func (c *Client) IssueCert(role, commonName, ttl string) (*RenewCertResponse, error) {
+	body, err := c.postJSON("/v1/pki/issue", map[string]string{
+		"role":        role,
+		"common_name": commonName,
+		"ttl":         ttl,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+
+	var resp RenewCertResponse
+	if err := json.NewDecoder(body).Decode(&resp); err != nil {
+		return nil, fmt.Errorf("decoding issued cert from %s: %w", c.Name, err)
+	}
+	return &resp, nil
+}
+
 // PushToken sends a new bearer token to the remote peer for updating its config.
 // This is used during token rotation and requires mTLS authentication.
 func (c *Client) PushToken(nodeName, newToken string) error {

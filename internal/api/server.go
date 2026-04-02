@@ -99,8 +99,11 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	// OpenBao token vending (mTLS-only)
 	mux.HandleFunc("POST /v1/openbao/token", s.openbaoToken)
 
-	// PKI cert renewal (mTLS-only)
+	// PKI cert renewal (mTLS-only, node certs only)
 	mux.HandleFunc("POST /v1/pki/renew", s.pkiRenew)
+
+	// PKI cert issuance (mTLS-only, any role)
+	mux.HandleFunc("POST /v1/pki/issue", s.pkiIssue)
 
 	// Web UI — serve embedded static files
 	uiContent, _ := fs.Sub(uiFS, "ui")
@@ -805,6 +808,64 @@ func (s *Server) pkiRenew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger.Info("pki cert renewed", "peer", peer, "serial", cert.Serial)
+	writeJSON(w, http.StatusOK, cert)
+}
+
+// pkiIssue handles general-purpose certificate issuance for authenticated peers.
+// Requires mTLS — the peer CN must match a known node name.
+// Accepts role, common_name, and ttl in the request body.
+func (s *Server) pkiIssue(w http.ResponseWriter, r *http.Request) {
+	peer := PeerIdentity(r.Context())
+	if peer == "" || peer == "cli" {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "certificate issuance requires mTLS authentication",
+		})
+		return
+	}
+
+	if s.pkiIssuer == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "PKI issuer not configured",
+		})
+		return
+	}
+
+	if !s.knownNodes[peer] {
+		s.logger.Warn("pki issue rejected: unknown node", "peer", peer)
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": fmt.Sprintf("unknown node %q", peer),
+		})
+		return
+	}
+
+	var req struct {
+		Role       string `json:"role"`
+		CommonName string `json:"common_name"`
+		TTL        string `json:"ttl"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if req.Role == "" || req.CommonName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "role and common_name are required"})
+		return
+	}
+	if req.TTL == "" {
+		req.TTL = "720h"
+	}
+
+	cert, err := s.pkiIssuer.Issue(req.Role, req.CommonName, req.TTL)
+	if err != nil {
+		s.logger.Error("pki issue failed", "peer", peer, "role", req.Role, "cn", req.CommonName, "error", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": "failed to issue certificate",
+		})
+		return
+	}
+
+	s.logger.Info("pki cert issued", "peer", peer, "role", req.Role, "cn", req.CommonName, "serial", cert.Serial)
 	writeJSON(w, http.StatusOK, cert)
 }
 
