@@ -1,7 +1,11 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -62,17 +66,58 @@ var secretGetCmd = &cobra.Command{
 	Short: "Retrieve a secret",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		key := args[0]
+
+		// Try daemon cache first (fast path)
+		if sock, err := defaultSocketPath(); err == nil {
+			if val, err := getSecretViaDaemon(sock, key); err == nil {
+				fmt.Println(val)
+				return nil
+			}
+		}
+
+		// Fall back to direct store
 		store, err := newSecretStore("cli")
 		if err != nil {
 			return err
 		}
-		val, err := store.Get(args[0])
+		val, err := store.Get(key)
 		if err != nil {
 			return err
 		}
 		fmt.Println(val)
 		return nil
 	},
+}
+
+// getSecretViaDaemon fetches a secret from the local daemon's cache via unix socket.
+func getSecretViaDaemon(socketPath, key string) (string, error) {
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", socketPath)
+			},
+		},
+	}
+
+	resp, err := client.Get("http://aurelia/v1/secrets/" + key)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("daemon returned %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", fmt.Errorf("decoding response: %w", err)
+	}
+	return body.Value, nil
 }
 
 type secretEntry struct {
