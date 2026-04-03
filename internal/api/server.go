@@ -51,6 +51,7 @@ type Server struct {
 	tokenVendor  *keychain.BaoTokenVendor
 	knownNodes   map[string]bool // valid peer CNs for token vending
 	pkiIssuer    *keychain.BaoPKIIssuer
+	secretCache  *keychain.CachedStore
 }
 
 // NewServer creates an API server backed by the given daemon.
@@ -86,6 +87,9 @@ func NewServer(d *daemon.Daemon, gpuObs *gpu.Observer) *Server {
 	mux.HandleFunc("GET /v1/cluster/services", s.clusterListServices)
 	mux.HandleFunc("GET /v1/cluster/graph", s.clusterGraph)
 	mux.HandleFunc("POST /v1/cluster/services/{name}/{action}", s.clusterServiceAction)
+
+	// Secret cache (local socket)
+	mux.HandleFunc("GET /v1/secrets/{key}", s.secretGet)
 
 	// Lamina workspace CLI execution
 	mux.HandleFunc("POST /v1/lamina", s.laminaExec)
