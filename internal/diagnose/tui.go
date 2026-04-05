@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -91,13 +92,15 @@ type actionConfirmMsg struct {
 // TUIModel is the Bubble Tea model for the diagnostic TUI.
 type TUIModel struct {
 	// Display state
-	entries   []chatEntry
-	streaming string
-	waiting   bool
+	entries     []chatEntry
+	streaming   string
+	waiting     bool
+	toolRunning bool // true while a tool is executing
 
 	// Components
 	input    textarea.Model
 	viewport viewport.Model
+	spinner  spinner.Model
 	width    int
 	height   int
 	ready    bool
@@ -121,6 +124,10 @@ func NewTUIModel(engine *Engine, service string) TUIModel {
 	ta.ShowLineNumbers = false
 	ta.KeyMap.InsertNewline.SetEnabled(false)
 
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = toolStyle
+
 	return TUIModel{
 		engine:  engine,
 		service: service,
@@ -128,7 +135,8 @@ func NewTUIModel(engine *Engine, service string) TUIModel {
 			{Role: talk.RoleSystem, Content: systemPrompt},
 			{Role: talk.RoleUser, Content: userMessage(service)},
 		},
-		input: ta,
+		input:   ta,
+		spinner: sp,
 	}
 }
 
@@ -213,6 +221,12 @@ func (m TUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
+	if m.toolRunning {
+		m.spinner, cmd = m.spinner.Update(msg)
+		cmds = append(cmds, cmd)
+		m.refreshViewport()
+	}
+
 	m.viewport, cmd = m.viewport.Update(msg)
 	cmds = append(cmds, cmd)
 
@@ -259,6 +273,7 @@ func (m TUIModel) handleStreamTick(msg streamTickMsg) (tea.Model, tea.Cmd) {
 		m.entries = append(m.entries, chatEntry{role: "agent", content: fmt.Sprintf("Error: %v", ev.err)})
 		m.streaming = ""
 		m.waiting = false
+		m.toolRunning = false
 		m.refreshViewport()
 		return m, nil
 	}
@@ -273,8 +288,11 @@ func (m TUIModel) handleStreamTick(msg streamTickMsg) (tea.Model, tea.Cmd) {
 			label += " " + strings.Join(parts, ", ")
 		}
 		m.entries = append(m.entries, chatEntry{role: "tool", content: label, collapsed: true})
+		// Inject inline marker into the streaming text
+		m.streaming += fmt.Sprintf("[tool_use: %s] ", ev.tool.name)
+		m.toolRunning = true
 		m.refreshViewport()
-		return m, waitForStreamEvent(msg.ch)
+		return m, tea.Batch(m.spinner.Tick, waitForStreamEvent(msg.ch))
 	}
 	if ev.done {
 		content := ev.content
@@ -288,11 +306,13 @@ func (m TUIModel) handleStreamTick(msg streamTickMsg) (tea.Model, tea.Cmd) {
 		}
 		m.streaming = ""
 		m.waiting = false
+		m.toolRunning = false
 		m.refreshViewport()
 		return m, nil
 	}
 	if ev.token != "" {
 		m.streaming += ev.token
+		m.toolRunning = false
 		m.refreshViewport()
 	}
 	return m, waitForStreamEvent(msg.ch)
@@ -350,10 +370,16 @@ func (m *TUIModel) refreshViewport() {
 		}
 	}
 
-	if m.streaming != "" {
+	if m.streaming != "" || m.toolRunning {
 		sb.WriteString(agentLabelStyle.Render("aurelia") + " ")
-		sb.WriteString(agentStyle.Width(contentWidth-9).Render(m.streaming))
-		sb.WriteString("\u2588")
+		if m.streaming != "" {
+			sb.WriteString(agentStyle.Width(contentWidth-9).Render(m.streaming))
+		}
+		if m.toolRunning {
+			sb.WriteString(m.spinner.View())
+		} else {
+			sb.WriteString("\u2588")
+		}
 		sb.WriteString("\n")
 	}
 
@@ -387,7 +413,7 @@ func (m TUIModel) startLLM() tea.Cmd {
 		Messages:      messages,
 		Tools:         toolDefs,
 		Stream:        true,
-		MaxIterations: 10,
+		MaxIterations: 50,
 	}
 
 	cfg := loop.RunConfig{

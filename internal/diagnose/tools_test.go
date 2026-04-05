@@ -2,8 +2,10 @@ package diagnose
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	tool "github.com/benaskins/axon-tool"
@@ -42,7 +44,7 @@ func TestReadToolsReturnsAllTools(t *testing.T) {
 	client := setupTestAPI(t, http.NotFoundHandler())
 	tools := ReadTools(client)
 
-	expected := []string{"list_services", "get_service", "inspect_service", "get_logs", "get_gpu", "cluster_services", "test_health_check", "get_health_check_history", "get_service_dependencies", "get_system_resources"}
+	expected := []string{"list_services", "get_service", "inspect_service", "get_logs", "get_gpu", "cluster_services", "test_health_check", "get_health_check_history", "get_service_dependencies", "get_system_resources", "check_port"}
 	for _, name := range expected {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("missing tool %q", name)
@@ -58,7 +60,7 @@ func TestActionToolsReturnsAllActions(t *testing.T) {
 	client := setupTestAPI(t, http.NotFoundHandler())
 	tools := ActionTools(client, nil)
 
-	expected := []string{"restart_service", "start_service", "stop_service", "remove_service"}
+	expected := []string{"restart_service", "start_service", "stop_service", "remove_service", "reload_specs", "kill_process"}
 	for _, name := range expected {
 		if _, ok := tools[name]; !ok {
 			t.Errorf("missing action tool %q", name)
@@ -71,8 +73,8 @@ func TestAllToolsCombinesReadAndAction(t *testing.T) {
 	client := setupTestAPI(t, http.NotFoundHandler())
 	tools := AllTools(client, nil)
 
-	if len(tools) != 14 {
-		t.Errorf("got %d tools, want 14", len(tools))
+	if len(tools) != 17 {
+		t.Errorf("got %d tools, want 17", len(tools))
 	}
 }
 
@@ -392,6 +394,137 @@ func TestRemoveToolExecutes(t *testing.T) {
 	}
 	if !contains(result.Content, "removed") {
 		t.Errorf("expected 'removed' in result, got %q", result.Content)
+	}
+}
+
+func TestCheckPortFree(t *testing.T) {
+	t.Parallel()
+	tools := ReadTools(setupTestAPI(t, http.NotFoundHandler()))
+
+	// Use a port that's unlikely to be in use
+	result := tools["check_port"].Execute(&tool.ToolContext{}, map[string]any{"port": float64(39999)})
+	if !contains(result.Content, "free") {
+		t.Errorf("expected 'free' for unused port, got %q", result.Content)
+	}
+}
+
+func TestCheckPortInUse(t *testing.T) {
+	t.Parallel()
+	// Start a listener to hold a port
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	port := ln.Addr().(*net.TCPAddr).Port
+	tools := ReadTools(setupTestAPI(t, http.NotFoundHandler()))
+
+	result := tools["check_port"].Execute(&tool.ToolContext{}, map[string]any{"port": float64(port)})
+	if !contains(result.Content, "in_use") {
+		t.Errorf("expected 'in_use' for held port, got %q", result.Content)
+	}
+}
+
+func TestCheckPortInvalid(t *testing.T) {
+	t.Parallel()
+	tools := ReadTools(setupTestAPI(t, http.NotFoundHandler()))
+
+	result := tools["check_port"].Execute(&tool.ToolContext{}, map[string]any{"port": float64(-1)})
+	if !contains(result.Content, "invalid") {
+		t.Errorf("expected error for invalid port, got %q", result.Content)
+	}
+}
+
+func killProcessTestAPI(t *testing.T, knownPID int) APIClient {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/services", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"name": "test-svc", "pid": knownPID, "port": 9999},
+		})
+	})
+	return setupTestAPI(t, mux)
+}
+
+func TestKillProcessRejected(t *testing.T) {
+	t.Parallel()
+	// Use our own PID as the "known" PID so the relationship check passes
+	// but the self-kill guard catches it... actually just use a mock PID.
+	pid := os.Getpid() + 1000 // arbitrary PID that won't exist
+	confirm := func(action, service, reason string) bool { return false }
+	tools := ActionTools(killProcessTestAPI(t, pid), confirm)
+
+	result := tools["kill_process"].Execute(&tool.ToolContext{}, map[string]any{
+		"pid":    float64(pid),
+		"reason": "test",
+	})
+	if !contains(result.Content, "rejected") {
+		t.Errorf("expected 'rejected', got %q", result.Content)
+	}
+}
+
+func TestKillProcessInvalidPID(t *testing.T) {
+	t.Parallel()
+	confirm := func(action, service, reason string) bool { return true }
+	tools := ActionTools(killProcessTestAPI(t, 0), confirm)
+
+	result := tools["kill_process"].Execute(&tool.ToolContext{}, map[string]any{
+		"pid":    float64(0),
+		"reason": "test",
+	})
+	if !contains(result.Content, "refusing") {
+		t.Errorf("expected 'refusing' for PID 0, got %q", result.Content)
+	}
+}
+
+func TestKillProcessUnrelatedPID(t *testing.T) {
+	t.Parallel()
+	confirm := func(action, service, reason string) bool { return true }
+	tools := ActionTools(killProcessTestAPI(t, 12345), confirm)
+
+	// PID 99999 is not in the mock service list
+	result := tools["kill_process"].Execute(&tool.ToolContext{}, map[string]any{
+		"pid":    float64(99999),
+		"reason": "test",
+	})
+	if !contains(result.Content, "not related") {
+		t.Errorf("expected 'not related' for unknown PID, got %q", result.Content)
+	}
+}
+
+func TestReloadSpecsApproved(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/reload", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "reloaded"})
+	})
+
+	client := setupTestAPI(t, mux)
+	confirm := func(action, service, reason string) bool { return true }
+	tools := ActionTools(client, confirm)
+
+	result := tools["reload_specs"].Execute(&tool.ToolContext{}, map[string]any{
+		"reason": "spec updated",
+	})
+	if !contains(result.Content, "reload specs") {
+		t.Errorf("expected 'reload specs' in result, got %q", result.Content)
+	}
+}
+
+func TestReloadSpecsRejected(t *testing.T) {
+	t.Parallel()
+	client := setupTestAPI(t, http.NotFoundHandler())
+	confirm := func(action, service, reason string) bool { return false }
+	tools := ActionTools(client, confirm)
+
+	result := tools["reload_specs"].Execute(&tool.ToolContext{}, map[string]any{
+		"reason": "test",
+	})
+	if !contains(result.Content, "rejected") {
+		t.Errorf("expected 'rejected', got %q", result.Content)
 	}
 }
 
