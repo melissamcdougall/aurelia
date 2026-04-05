@@ -1226,7 +1226,6 @@ service:
 	if err := orphanCmd.Start(); err != nil {
 		t.Fatalf("starting orphan process: %v", err)
 	}
-	orphanPID := orphanCmd.Process.Pid
 	go orphanCmd.Wait()
 	t.Cleanup(func() { orphanCmd.Process.Kill() })
 
@@ -1267,19 +1266,28 @@ service:
 		t.Fatal("expected service to be in adopted list (found by command match)")
 	}
 
+	// The adopted PID should be the orphan, not the decoy
 	state, err := d.ServiceState("sleeper")
 	if err != nil {
 		t.Fatalf("ServiceState: %v", err)
 	}
-
-	// The adopted PID should be the orphan, not the decoy
 	if state.PID == decoyPID {
 		t.Error("should not have adopted the decoy PID")
 	}
-	if state.PID != orphanPID {
-		// It might have been redeployed already, which is fine — just verify
-		// the service is running
-		t.Logf("PID is %d (orphan was %d), may have already been redeployed", state.PID, orphanPID)
+
+	// redeployWait is 1ms, so the redeploy goroutine may have already stopped
+	// and restarted the service by the time we check. Poll until running rather
+	// than asserting immediately against a transitional state.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		state, err = d.ServiceState("sleeper")
+		if err != nil {
+			t.Fatalf("ServiceState: %v", err)
+		}
+		if state.State == "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if state.State != "running" {
 		t.Errorf("expected running, got %v", state.State)
