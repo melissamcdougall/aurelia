@@ -22,3 +22,4 @@ docs/plans/
 *.tmp
 *.log
 coverage.out
+data/
