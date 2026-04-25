@@ -1218,12 +1218,14 @@ func TestDaemonRecoverOrphanByCommandMatch(t *testing.T) {
 service:
   name: sleeper
   type: native
-  command: "sleep 300"
+  command: "sleep 12347"
 `)
 
 	// Start the "orphaned" process — this simulates a process from a previous
-	// daemon instance that is still running.
-	orphanCmd := exec.Command("sleep", "300")
+	// daemon instance that is still running. The sleep duration is deliberately
+	// unusual so the command-match scan won't adopt some other `sleep 300` on
+	// the machine.
+	orphanCmd := exec.Command("sleep", "12347")
 	if err := orphanCmd.Start(); err != nil {
 		t.Fatalf("starting orphan process: %v", err)
 	}
@@ -1248,7 +1250,7 @@ service:
 	if err := sf.set("sleeper", ServiceRecord{
 		Type:    "native",
 		PID:     decoyPID,
-		Command: "sleep 300",
+		Command: "sleep 12347",
 	}); err != nil {
 		t.Fatalf("writing state: %v", err)
 	}
@@ -1268,19 +1270,34 @@ service:
 		t.Fatal("expected service to be in adopted list (found by command match)")
 	}
 
+	// The adopted PID should be the orphan, not the decoy. Check immediately
+	// after Start — before the 1ms redeploy goroutine is likely to have fired.
 	state, err := d.ServiceState("sleeper")
 	if err != nil {
 		t.Fatalf("ServiceState: %v", err)
 	}
-
-	// The adopted PID should be the orphan, not the decoy
 	if state.PID == decoyPID {
 		t.Error("should not have adopted the decoy PID")
 	}
 	if state.PID != orphanPID {
-		// It might have been redeployed already, which is fine — just verify
-		// the service is running
-		t.Logf("PID is %d (orphan was %d), may have already been redeployed", state.PID, orphanPID)
+		// The daemon may have already redeployed — log for diagnostics but
+		// don't hard-fail; the decoy check above is the real correctness guard.
+		t.Logf("adopted PID %d, orphan was %d (may have already been redeployed)", state.PID, orphanPID)
+	}
+
+	// redeployWait is 1ms, so the redeploy goroutine may have already stopped
+	// and restarted the service by the time we check. Poll until running rather
+	// than asserting immediately against a transitional state.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		state, err = d.ServiceState("sleeper")
+		if err != nil {
+			t.Fatalf("ServiceState: %v", err)
+		}
+		if state.State == "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if state.State != "running" {
 		t.Errorf("expected running, got %v", state.State)
